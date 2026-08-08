@@ -1,0 +1,86 @@
+[project]
+name = 'hermetica-security-pocs'
+description = 'Local-only security validation using production USDh contracts'
+authors = []
+telemetry = false
+cache_dir = '.cache-security'
+
+[contracts.sip-010-trait]
+path = '../../../mainnet/contracts/usdh/traits/sip-010-trait.clar'
+clarity_version = 2
+epoch = 2.5
+
+[contracts.token-migration-trait]
+path = '../../../mainnet/contracts/usdh/traits/token-migration-trait-v1.clar'
+clarity_version = 2
+epoch = 2.5
+
+[contracts.interim-token-trait]
+path = '../../../mainnet/contracts/usdh/traits/interim-token-trait-v1.clar'
+clarity_version = 2
+epoch = 2.5
+
+[contracts.staking-trait]
+path = '../../../mainnet/contracts/usdh/traits/staking-trait-v1.clar'
+clarity_version = 3
+epoch = 3.2
+
+[contracts.staking-silo-trait]
+path = '../../../mainnet/contracts/usdh/traits/staking-silo-trait-v1.clar'
+clarity_version = 3
+epoch = 3.2
+
+[contracts.hq]
+path = '../../../mainnet/contracts/usdh/protocol/hq-v1.clar'
+clarity_version = 2
+epoch = 2.5
+
+[contracts.minting-state]
+path = '../../../mainnet/contracts/usdh/protocol/minting-state-v1.clar'
+clarity_version = 2
+epoch = 2.5
+
+[contracts.blacklist-susdh]
+path = '../../../mainnet/contracts/usdh/protocol/blacklist-susdh-v1.clar'
+clarity_version = 2
+epoch = 2.5
+
+[contracts.usdh-token]
+path = '../../../mainnet/contracts/usdh/tokens/usdh-token-v1.clar'
+clarity_version = 2
+epoch = 2.5
+
+[contracts.susdh-token]
+path = '../../../mainnet/contracts/usdh/tokens/susdh-token-v1.clar'
+clarity_version = 2
+epoch = 2.5
+
+[contracts.minting-otc]
+path = '../../../mainnet/contracts/usdh/protocol/minting-otc-v1-1.clar'
+clarity_version = 4
+epoch = 3.3
+
+[contracts.staking-state]
+path = '../../../mainnet/contracts/usdh/protocol/staking-state-v1.clar'
+clarity_version = 3
+epoch = 3.2
+
+[contracts.staking-silo]
+path = '../../../mainnet/contracts/usdh/protocol/staking-silo-v1-1.clar'
+clarity_version = 3
+epoch = 3.2
+
+[contracts.staking-reserve]
+path = '../../../mainnet/contracts/usdh/protocol/staking-reserve-v1.clar'
+clarity_version = 3
+epoch = 3.2
+
+[contracts.staking]
+path = '../../../mainnet/contracts/usdh/protocol/staking-v1-1.clar'
+clarity_version = 2
+epoch = 3.2
+
+[contracts.redeeming-reserve]
+path = '../../../mainnet/contracts/usdh/protocol/redeeming-reserve-v1-2.clar'
+clarity_version = 2
+epoch = 3.2
