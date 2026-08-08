@@ -23,5 +23,5 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run stale-NAV external-loss value-transfer PoC
-        run: node tests/security/stale-nav/run-stale-nav-poc.mjs
+      - name: Read live hBTC accounting controls (read-only)
+        run: node tests/security/standalone/read-live-hbtc-controls.mjs
