@@ -1,6 +1,9 @@
+import { mkdir, writeFile } from 'node:fs/promises';
+
 const API = 'https://api.hiro.so';
 const HBTC = 'SP1S1HSFH0SQQGWKB69EYFNY0B1MHRMGXR3J1FH4D';
 const CONTROLLER = `${HBTC}.controller-hbtc-v1`;
+const EVIDENCE_PATH = 'tests/security/evidence/live-hbtc-positive-reward-history.json';
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -98,6 +101,9 @@ const evidence = {
   most_recent_positive_calls: [...successfulPositive].sort((a, b) => b.block_height - a.block_height).slice(0, 10),
 };
 
+await mkdir('tests/security/evidence', { recursive: true });
+await writeFile(EVIDENCE_PATH, JSON.stringify(evidence, null, 2) + '\n');
+console.log(`LIVE_HBTC_POSITIVE_REWARD_EVIDENCE_FILE=${EVIDENCE_PATH}`);
 console.log('LIVE_HBTC_POSITIVE_REWARD_HISTORY=' + JSON.stringify(evidence));
 
 if (successfulPositive.length > 0) {
