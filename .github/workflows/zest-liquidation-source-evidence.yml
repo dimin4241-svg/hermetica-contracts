@@ -35,6 +35,9 @@ jobs:
       - name: Recover historical hBTC Zest open transactions
         run: node tests/security/standalone/read-historical-hbtc-zest-opens.mjs
 
+      - name: Verify live hBTC standard exit fee
+        run: node tests/security/standalone/read-live-hbtc-fees.mjs
+
       - name: Upload deployed-source evidence
         uses: actions/upload-artifact@v4
         with:
