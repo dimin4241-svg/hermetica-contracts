@@ -44,7 +44,6 @@ confirmRole('confirm-rewarder-request', rewarder);
 expect('confirm sBTC asset', pub('state', 'confirm-asset-request', [Cl.principal(SBTC)], deployer), '(ok true)');
 expect('deposit cap', pub('state', 'set-deposit-cap', [Cl.uint(2n * BASE)], deployer), '(ok true)');
 
-// Prove the production defaults represented by the unchanged source.
 expect('default max-reward', ro('state', 'get-max-reward'), 'u5');
 expect('default max-deviation', ro('state', 'get-max-deviation'), 'u7');
 expect('default update-window', ro('state', 'get-update-window'), 'u86340');
@@ -64,25 +63,26 @@ expect('fresh NAV log', pub('controller-hbtc', 'log-reward', [Cl.uint(0), Cl.boo
 expect('realize 6bps loss', pub('strategy-loss-helper', 'realize-loss', [Cl.uint(LOSS), Cl.principal(deployer)], deployer), '(ok true)');
 assert.equal(sbtc(helper), BASE - LOSS);
 
-// First barrier: a real loss cannot be reflected until the daily window opens.
-expect('immediate negative update', pub('controller-hbtc', 'log-reward', [Cl.uint(LOSS), Cl.bool(false)], rewarder), '(err u102011)');
+// check-max-reward runs before check-update-window. A realized loss just one bp
+// above the live 5bps ceiling is therefore rejected immediately, regardless of time.
+expect('immediate 6bps negative update exceeds cap', pub('controller-hbtc', 'log-reward', [Cl.uint(LOSS), Cl.bool(false)], rewarder), '(err u102009)');
 assert.equal(price(), BASE);
 
-// A normal depositor still enters at the stale price and supplies real reserve liquidity.
+// Deposits and matured claim funding remain enabled while accounting is stale.
 expect('victim stale deposit', pub('vault', 'deposit', [Cl.uint(VICTIM_DEPOSIT), Cl.none()], victim), '(ok u40000000)');
 assert.equal(sbtc(reserve), VICTIM_DEPOSIT);
 expect('fund old matured claim', pub('vault', 'fund-claim', [Cl.uint(1)], attacker), '(ok u40000000)');
 assert.equal(sbtc(reserve), 0n);
 expect('redeem old claim', pub('vault', 'redeem', [Cl.uint(1)], attacker), '(ok u40000000)');
 
-// Second barrier: even after the time window opens, the unchanged 5bps max-reward
-// cap rejects this already-realized 6bps loss in one reconciliation transaction.
+// Even after the daily window opens, the unchanged 5bps ceiling still rejects
+// the full already-realized 6bps loss.
 simnet.mineEmptyBlocks(200);
 expect('post-window 6bps negative update remains blocked', pub('controller-hbtc', 'log-reward', [Cl.uint(LOSS), Cl.bool(false)], rewarder), '(err u102009)');
 assert.equal(price(), BASE, 'share price remains stale even after the daily window opens');
 
-// At most 5bps can be recognized in this window. Doing so starts a new daily window,
-// leaving the final 1bp stale until another window (absent governance intervention).
+// At most 5bps can be recognized in this window. This starts a new daily window,
+// leaving the final 1bp stale until another window absent governance intervention.
 const FIVE_BPS = 50_000n;
 expect('recognize only 5bps', pub('controller-hbtc', 'log-reward', [Cl.uint(FIVE_BPS), Cl.bool(false)], rewarder), '(ok true)');
 assert.equal(price(), 99_950_000n);
