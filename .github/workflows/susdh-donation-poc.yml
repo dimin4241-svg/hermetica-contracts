@@ -34,3 +34,6 @@ jobs:
 
       - name: Read live staking state (read-only)
         run: node tests/security/standalone/read-live-staking-state.mjs
+
+      - name: Inspect staking v1.1 migration window (read-only)
+        run: node tests/security/standalone/read-staking-migration-window.mjs
