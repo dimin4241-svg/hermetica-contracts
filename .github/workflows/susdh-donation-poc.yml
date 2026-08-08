@@ -34,3 +34,6 @@ jobs:
 
       - name: Read live hBTC / Zest position state
         run: node tests/security/standalone/read-live-hbtc-risk.mjs
+
+      - name: Reconstruct live hBTC external registry
+        run: node tests/security/standalone/read-live-hbtc-externals.mjs
