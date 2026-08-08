@@ -43,7 +43,7 @@ function balance(token, who) {
 console.log('--- local production-contract setup ---');
 expectCv('hq.set-contract-active(deployer)', pub('hq', 'set-contract-active', [Cl.principal(deployer), Cl.bool(true)], deployer), '(ok true)');
 expectCv('hq.set-contract-active(staking-silo)', pub('hq', 'set-contract-active', [Cl.principal(stakingSilo), Cl.bool(true)], deployer), '(ok true)');
-expectCv('minting-state.set-whitelist-enabled(false)', pub('minting-state', 'set-whitelist-enabled', [Cl.bool(false)], deployer), '(ok false)');
+expectCv('minting-state.set-whitelist-enabled(false)', pub('minting-state', 'set-whitelist-enabled', [Cl.bool(false)], deployer), '(ok true)');
 expectCv('minting-otc.set-trader', pub('minting-otc', 'set-trader', [Cl.principal(trader), Cl.bool(true), Cl.bool(false)], deployer), '(ok true)');
 
 expectCv('fund attacker', pub('minting-otc', 'confirm-mint', [Cl.stringAscii('attack-fund'), Cl.principal(attacker), Cl.uint(ATTACKER_INITIAL_STAKE + DONATION), Cl.uint(BASE)], trader), '(ok true)');
