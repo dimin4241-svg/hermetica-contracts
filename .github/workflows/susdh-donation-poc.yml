@@ -62,6 +62,9 @@ jobs:
       - name: Reconstruct live hBTC external registry
         run: node tests/security/standalone/read-live-hbtc-externals.mjs
 
+      - name: Reconstruct live hBTC protocol roles
+        run: node tests/security/standalone/read-live-hbtc-protocol-roles.mjs
+
       - name: Upload compact Zest deployed-source evidence
         uses: actions/upload-artifact@v4
         with:
