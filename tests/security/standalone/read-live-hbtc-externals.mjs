@@ -2,13 +2,15 @@ import { Cl, deserializeCV, cvToString } from '@stacks/transactions';
 
 const API = 'https://api.hiro.so';
 const HBTC = 'SP1S1HSFH0SQQGWKB69EYFNY0B1MHRMGXR3J1FH4D';
+const ZEST = 'SP1A27KFY4XERQCCRCARCYD1CC5N7M6688BSYADJ7';
 const STATE = `${HBTC}.state-hbtc-v1`;
 
 const known = {
-  'zest-v0-3-market': 'SP1A27KFY4XERQCCRCARCYD1CC5N7M6688BSYADJ7.v0-3-market',
-  'zest-v0-market-vault': 'SP1A27KFY4XERQCCRCARCYD1CC5N7M6688BSYADJ7.v0-market-vault',
-  'zest-v0-vault-sbtc': 'SP1A27KFY4XERQCCRCARCYD1CC5N7M6688BSYADJ7.v0-vault-sbtc',
-  'zest-v0-vault-usdh': 'SP1A27KFY4XERQCCRCARCYD1CC5N7M6688BSYADJ7.v0-vault-usdh',
+  'zest-v0-3-market': `${ZEST}.v0-3-market`,
+  'zest-v0-4-market': `${ZEST}.v0-4-market`,
+  'zest-v0-market-vault': `${ZEST}.v0-market-vault`,
+  'zest-v0-vault-sbtc': `${ZEST}.v0-vault-sbtc`,
+  'zest-v0-vault-usdh': `${ZEST}.v0-vault-usdh`,
   'granite-borrower-v1': 'SP26NGV9AFZBX7XBDBS2C7EC7FCPSAV9PKREQNMVS.borrower-v1',
   'hermetica-staking-v1-1': 'SPN5AKG35QZSK2M8GAMR4AFX45659RJHDW353HSG.staking-v1-1',
   'hermetica-staking-silo-v1-1': 'SPN5AKG35QZSK2M8GAMR4AFX45659RJHDW353HSG.staking-silo-v1-1',
@@ -34,6 +36,12 @@ const knownState = {};
 for (const [name,address] of Object.entries(known)) {
   knownState[name] = { address, result: await callRead('get-external',[Cl.principal(address)]) };
 }
+
+const sourceResp = await req(`${API}/v2/contracts/source/${ZEST}/v0-4-market`);
+const source = sourceResp.source ?? sourceResp.source_code ?? '';
+const liqPos = source.indexOf('(define-public (liquidate');
+const liquidationFragment = liqPos >= 0 ? source.slice(liqPos, Math.min(source.length, liqPos + 8000)) : 'NOT_FOUND';
+console.log('ZEST_V04_LIQUIDATE_SOURCE=' + liquidationFragment);
 
 const calls = [];
 for (let offset=0; offset<500; offset+=50) {
