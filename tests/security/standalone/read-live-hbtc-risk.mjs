@@ -1,10 +1,12 @@
-import { Cl, serializeCV, deserializeCV, cvToString } from '@stacks/transactions';
+import { Cl, deserializeCV, cvToString } from '@stacks/transactions';
 
 const API = 'https://api.hiro.so';
 const HBTC = 'SP1S1HSFH0SQQGWKB69EYFNY0B1MHRMGXR3J1FH4D';
 const ZEST = 'SP1A27KFY4XERQCCRCARCYD1CC5N7M6688BSYADJ7';
 const ZEST_MARKET = 'v0-3-market';
+const ZEST_MARKET_VAULT = 'v0-market-vault';
 const ZEST_ACCOUNT = `${HBTC}.zest-interface-hbtc-v1`;
+const TRADING = `${HBTC}.trading-hbtc-v1`;
 const SBTC_ASSET = 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token::sbtc-token';
 
 async function getJson(url, options = {}) {
@@ -22,8 +24,8 @@ async function getJson(url, options = {}) {
 }
 
 function argHex(cv) {
-  const bytes = serializeCV(cv);
-  return '0x' + Buffer.from(bytes).toString('hex');
+  // Stacks.js Cl.serialize returns raw hex without the 0x prefix.
+  return '0x' + Cl.serialize(cv);
 }
 
 async function callRead(address, contract, fn, args = [], sender = HBTC) {
@@ -44,6 +46,14 @@ async function ftBalances(principal) {
 async function contractSource(address, contract) {
   const j = await getJson(`${API}/v2/contracts/source/${address}/${contract}`);
   return j.source ?? j.source_code ?? '';
+}
+
+async function addressTransactions(principal, limit = 100) {
+  try {
+    return await getJson(`${API}/extended/v1/address/${encodeURIComponent(principal)}/transactions?limit=${limit}&offset=0`);
+  } catch (e) {
+    return { error: String(e), results: [] };
+  }
 }
 
 const stateFns = [
@@ -77,20 +87,49 @@ function summarizeFt(j) {
 }
 
 const source = await contractSource(ZEST, ZEST_MARKET);
-for (const needle of ['(define-read-only (get-position', '(define-read-only (get-full-position', '(define-read-only (get-liquidation-position']) {
+for (const needle of [
+  '(define-private (get-position',
+  '(define-private (get-full-position',
+  '(define-private (get-liquidation-position',
+  '(define-read-only (get-position',
+]) {
   const pos = source.indexOf(needle);
-  if (pos >= 0) console.log(`ZEST_GETTER_SOURCE=${source.slice(pos, Math.min(source.length, pos + 2600))}`);
+  if (pos >= 0) console.log(`ZEST_GETTER_SOURCE=${source.slice(pos, Math.min(source.length, pos + 3200))}`);
   else console.log(`ZEST_GETTER_NOT_FOUND=${needle}`);
 }
 
-const zestReads = {};
-for (const fn of ['get-position', 'get-full-position', 'get-liquidation-position']) {
+const positionReads = {};
+for (const [contract, fn] of [
+  [ZEST_MARKET_VAULT, 'resolve-safe'],
+  [ZEST_MARKET_VAULT, 'resolve'],
+]) {
   try {
-    zestReads[fn] = await callRead(ZEST, ZEST_MARKET, fn, [Cl.principal(ZEST_ACCOUNT)], ZEST_ACCOUNT);
+    positionReads[`${contract}.${fn}`] = await callRead(ZEST, contract, fn, [Cl.principal(ZEST_ACCOUNT)], ZEST_ACCOUNT);
   } catch (e) {
-    zestReads[fn] = { error: String(e) };
+    positionReads[`${contract}.${fn}`] = { error: String(e) };
   }
 }
+
+const tradingTxsRaw = await addressTransactions(TRADING, 100);
+const tradingTxs = (tradingTxsRaw?.results ?? []).map(tx => ({
+  tx_id: tx.tx_id,
+  block_height: tx.block_height,
+  block_time_iso: tx.block_time_iso,
+  status: tx.tx_status,
+  contract_id: tx.contract_call?.contract_id,
+  function_name: tx.contract_call?.function_name,
+  function_args: tx.contract_call?.function_args?.map(a => ({ name: a.name, repr: a.repr })),
+})).filter(tx => tx.contract_id === TRADING || (tx.function_name ?? '').includes('zest'));
+
+const zestAccountTxsRaw = await addressTransactions(ZEST_ACCOUNT, 100);
+const zestAccountTxs = (zestAccountTxsRaw?.results ?? []).map(tx => ({
+  tx_id: tx.tx_id,
+  block_height: tx.block_height,
+  block_time_iso: tx.block_time_iso,
+  status: tx.tx_status,
+  contract_id: tx.contract_call?.contract_id,
+  function_name: tx.contract_call?.function_name,
+}));
 
 const blocks = await getJson(`${API}/extended/v2/blocks?limit=1`);
 const latest = blocks?.results?.[0] ?? null;
@@ -110,7 +149,9 @@ const snapshot = {
   reserve_ft: summarizeFt(reserveBalances),
   reserve_fund_ft: summarizeFt(reserveFundBalances),
   zest_interface_ft: summarizeFt(zestInterfaceBalances),
-  zest_position_reads: zestReads,
+  zest_position_reads: positionReads,
+  recent_trading_txs: tradingTxs,
+  recent_zest_account_txs: zestAccountTxs,
 };
 
 console.log('LIVE_HBTC_RISK=' + JSON.stringify(snapshot));
