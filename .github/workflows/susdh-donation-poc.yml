@@ -60,12 +60,15 @@ jobs:
         run: node tests/security/standalone/read-live-hbtc-risk.mjs
 
       - name: Reconstruct live hBTC external registry
+        if: always()
         run: node tests/security/standalone/read-live-hbtc-externals.mjs
 
       - name: Reconstruct live hBTC protocol roles
+        if: always()
         run: node tests/security/standalone/read-live-hbtc-protocol-roles.mjs
 
       - name: Upload compact Zest deployed-source evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: zest-v04-liquidation-source
