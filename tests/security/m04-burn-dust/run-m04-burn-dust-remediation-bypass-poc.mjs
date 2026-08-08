@@ -75,13 +75,21 @@ async function setup() {
   return { simnet, deployer, rewarder, user, pub, ro, expect, reserve };
 }
 
+async function installBurnDust(x) {
+  x.expect(
+    'send 1000 hBTC to permanent burn address',
+    x.pub('token-hbtc', 'transfer', [Cl.uint(BURN_SHARES), Cl.principal(x.user), Cl.principal(BURN), Cl.none()], x.user),
+    '(ok true)',
+  );
+  assert.equal(u(x.ro('token-hbtc', 'get-balance', [Cl.principal(BURN)])), BURN_SHARES);
+}
+
 console.log('\n=== CONTROL: M-04 remediation works when share supply can reach zero ===');
 {
   const x = await setup();
   x.expect('request all shares', x.pub('vault', 'request-redeem', [Cl.uint(BASE), Cl.bool(false)], x.user), '(ok u1)');
   x.simnet.mineEmptyBlocks(500);
 
-  // process-claim rounds 100,000,000 shares * 1.00000001 to 100,000,001 sats.
   // Burning every share makes post-share-supply == 0, so check-max-deviation deliberately
   // treats deviation as zero. This is the intended M-04 remediation path.
   x.expect('fund final claim with zero post-supply', x.pub('vault', 'fund-claim', [Cl.uint(1)], x.user), '(ok u100000001)');
@@ -89,18 +97,10 @@ console.log('\n=== CONTROL: M-04 remediation works when share supply can reach z
   console.log('PASS M04 CONTROL: without permanent burn shares, the final claim succeeds because post-share-supply reaches zero and the M-04 deviation bypass activates.');
 }
 
-console.log('\n=== EXPLOIT CONDITION: required 1000 burn shares make zero supply unreachable ===');
+console.log('\n=== ONE-SHOT FAILURE: required 1000 burn shares make zero supply unreachable ===');
 {
   const x = await setup();
-
-  // Reproduce Hermetica mainnet README / QA-15 deployment procedure: permanently strand
-  // 1000 nano-hBTC at the inaccessible standard burn principal.
-  x.expect(
-    'send 1000 hBTC to permanent burn address',
-    x.pub('token-hbtc', 'transfer', [Cl.uint(BURN_SHARES), Cl.principal(x.user), Cl.principal(BURN), Cl.none()], x.user),
-    '(ok true)',
-  );
-  assert.equal(u(x.ro('token-hbtc', 'get-balance', [Cl.principal(BURN)])), BURN_SHARES);
+  await installBurnDust(x);
 
   const redeemableShares = BASE - BURN_SHARES;
   x.expect('request every redeemable share', x.pub('vault', 'request-redeem', [Cl.uint(redeemableShares), Cl.bool(false)], x.user), '(ok u1)');
@@ -127,14 +127,42 @@ console.log('\n=== EXPLOIT CONDITION: required 1000 burn shares make zero supply
   assert.equal(postPrice, 100_100_000n);
   assert.equal(deviationBps, 9n);
 
-  // Same economic final exit, same accounting, same 1-sat reward. The only difference from
-  // the successful control is the required 1000 permanent shares. Because post-share-supply
-  // is 1000 instead of zero, the M-04 bypass no longer activates and the transaction reverts.
-  x.expect('fund final real-holder claim', x.pub('vault', 'fund-claim', [Cl.uint(1)], x.user), '(err u102014)');
+  x.expect('fund all real-holder shares in one claim', x.pub('vault', 'fund-claim', [Cl.uint(1)], x.user), '(err u102014)');
 
   // Atomicity control: failed funding did not burn the user's escrowed shares or mutate accounting.
   assert.equal(u(x.ro('token-hbtc', 'get-total-supply')), BASE);
   assert.equal(u(x.ro('state', 'get-share-price')), prePrice);
 
-  console.log('PASS M04 REMEDIATION BYPASS: the required 1000 permanent burn shares prevent post-share-supply from reaching zero. A 1-sat positive reward is enough for integer rounding to concentrate 1 sat of residual assets onto those 1000 shares, producing a 9 bps post-funding price jump and reverting the last real holder at the default 7 bps max-deviation.');
+  console.log('PASS M04 ONE-SHOT FAILURE: the required 1000 permanent shares turn a final one-shot redemption into ERR_DEVIATION at the default 7 bps threshold.');
+}
+
+console.log('\n=== TRIAGER COUNTER-CONTROL: splitting the final exit avoids permanent freeze ===');
+{
+  const x = await setup();
+  await installBurnDust(x);
+
+  // For this fixture, leave 250 real shares for the second claim. The first funding moves
+  // share price by exactly 7 bps (allowed), and the second moves it by only 1 bp.
+  // Therefore the one-shot revert above is NOT an irreducible permanent freeze.
+  const secondClaimShares = 250n;
+  const firstClaimShares = BASE - BURN_SHARES - secondClaimShares;
+
+  x.expect('request first split claim', x.pub('vault', 'request-redeem', [Cl.uint(firstClaimShares), Cl.bool(false)], x.user), '(ok u1)');
+  x.simnet.mineEmptyBlocks(500);
+  x.expect('fund first split claim', x.pub('vault', 'fund-claim', [Cl.uint(1)], x.user), '(ok u99998750)');
+  x.expect('redeem first split claim', x.pub('vault', 'redeem', [Cl.uint(1)], x.user), '(ok u99998750)');
+
+  assert.equal(u(x.ro('token-hbtc', 'get-total-supply')), BURN_SHARES + secondClaimShares);
+  assert.equal(u(x.ro('state', 'get-share-price')), 100_080_000n);
+
+  x.expect('request second split claim', x.pub('vault', 'request-redeem', [Cl.uint(secondClaimShares), Cl.bool(false)], x.user), '(ok u2)');
+  x.simnet.mineEmptyBlocks(500);
+  x.expect('fund second split claim', x.pub('vault', 'fund-claim', [Cl.uint(2)], x.user), '(ok u250)');
+  x.expect('redeem second split claim', x.pub('vault', 'redeem', [Cl.uint(2)], x.user), '(ok u250)');
+
+  assert.equal(u(x.ro('token-hbtc', 'get-total-supply')), BURN_SHARES);
+  assert.equal(u(x.ro('token-hbtc', 'get-balance', [Cl.principal(x.user)])), 0n);
+  assert.equal(u(x.ro('state', 'get-share-price')), 100_100_000n);
+
+  console.log('PASS TRIAGER COUNTER-CONTROL: all real user shares can still be redeemed by splitting the final exit into two claims. M-04 + burn dust is therefore a one-shot redemption DoS/accounting edge, not a permanent user-funds freeze. Do not submit it as High/Critical.');
 }
