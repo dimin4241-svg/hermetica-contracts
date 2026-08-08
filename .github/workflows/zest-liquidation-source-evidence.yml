@@ -32,6 +32,9 @@ jobs:
       - name: Resolve deployed liquidation penalty values for hBTC masks
         run: node tests/security/standalone/read-zest-v04-egroup-values.mjs
 
+      - name: Recover historical hBTC Zest open transactions
+        run: node tests/security/standalone/read-historical-hbtc-zest-opens.mjs
+
       - name: Upload deployed-source evidence
         uses: actions/upload-artifact@v4
         with:
@@ -40,4 +43,5 @@ jobs:
             tests/security/evidence/zest-v04-liquidation-source.txt
             tests/security/evidence/zest-v04-egroup-source.txt
             tests/security/evidence/zest-v04-egroup-values.txt
+            tests/security/evidence/hbtc-historical-zest-opens.json
           if-no-files-found: error
