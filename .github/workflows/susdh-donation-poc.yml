@@ -26,6 +26,9 @@ jobs:
       - name: Run stale-NAV external-loss value-transfer PoC
         run: node tests/security/stale-nav/run-stale-nav-poc.mjs
 
+      - name: Run reconciled-NAV negative control
+        run: node tests/security/stale-nav/run-reconciled-control.mjs
+
       - name: Run stale-NAV live-limits blocking PoC
         run: node tests/security/stale-nav/run-live-limits-blocking-poc.mjs
 
