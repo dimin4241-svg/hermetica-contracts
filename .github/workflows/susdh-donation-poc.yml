@@ -25,3 +25,6 @@ jobs:
 
       - name: Run standalone sUSDh donation PoC
         run: node tests/security/standalone/run-donation-poc.mjs
+
+      - name: Run standalone tx-sender confused-deputy PoCs
+        run: node tests/security/standalone/run-confused-deputy-pocs.mjs
