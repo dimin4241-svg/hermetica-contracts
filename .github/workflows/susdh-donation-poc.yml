@@ -26,8 +26,11 @@ jobs:
       - name: Run stale-NAV external-loss value-transfer PoC
         run: node tests/security/stale-nav/run-stale-nav-poc.mjs
 
-      - name: Run stale-NAV live-limits PoC
+      - name: Run stale-NAV live-limits blocking PoC
         run: node tests/security/stale-nav/run-live-limits-blocking-poc.mjs
+
+      - name: Run stale-NAV live-limits exact value-transfer + PR137 bypass PoC
+        run: node tests/security/stale-nav/run-live-limits-value-transfer-poc.mjs
 
       - name: Read live hBTC accounting and reachability controls
         run: node tests/security/standalone/read-live-hbtc-controls.mjs
