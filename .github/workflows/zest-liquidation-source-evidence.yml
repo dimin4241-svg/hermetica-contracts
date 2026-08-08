@@ -1,0 +1,30 @@
+name: Zest v0-4 Liquidation Source Evidence
+
+on:
+  push:
+    branches:
+      - validation-susdh-donation-poc
+  workflow_dispatch:
+
+jobs:
+  evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout validation branch
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Prove deployed Zest v0-4 liquidation semantics
+        run: node tests/security/standalone/read-zest-v04-liquidation-source.mjs
+
+      - name: Upload deployed-source evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: zest-v04-liquidation-source
+          path: tests/security/evidence/zest-v04-liquidation-source.txt
+          if-no-files-found: error
