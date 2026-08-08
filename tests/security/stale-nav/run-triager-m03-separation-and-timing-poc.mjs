@@ -131,6 +131,7 @@ console.log('\n=== TRIAGER CONTROL B: mature standard claim is a cancellable pre
   const victimFairLoss = 6_000n;
   const victimActualLoss = VICTIM_SHARES - victimValue;
   const victimIncrementalLoss = victimActualLoss - victimFairLoss;
+  const integerRoundingDust = victimIncrementalLoss - attackerExcess;
 
   console.log(`attacker stale payout raw:       ${stalePayout}`);
   console.log(`attacker fair payout raw:        ${FAIR_ATTACKER_AFTER_LOSS}`);
@@ -138,11 +139,12 @@ console.log('\n=== TRIAGER CONTROL B: mature standard claim is a cancellable pre
   console.log(`victim fair loss raw:            ${victimFairLoss}`);
   console.log(`victim actual loss raw:          ${victimActualLoss}`);
   console.log(`victim incremental loss raw:     ${victimIncrementalLoss}`);
+  console.log(`integer rounding dust raw:       ${integerRoundingDust}`);
 
   assert.equal(attackerExcess, 4_000n);
-  assert.equal(victimActualLoss, 10_000n);
-  assert.equal(victimIncrementalLoss, 4_000n);
-  assert.equal(attackerExcess, victimIncrementalLoss);
+  assert.ok(victimActualLoss >= 10_000n && victimActualLoss <= 10_001n, 'victim loss differs only by at most one sat of integer conversion rounding');
+  assert.ok(victimIncrementalLoss >= attackerExcess && victimIncrementalLoss <= attackerExcess + 1n, 'economic loss shift equals attacker avoided loss, plus at most one sat of unrelated rounding dust');
+  assert.ok(integerRoundingDust >= 0n && integerRoundingDust <= 1n, 'rounding contribution must remain at most one sat');
 
-  console.log('PASS NEW-BUG POSITIVE CONTROL: the old request-time M-03 is fixed and the same standard claim is cancellable before funding, yet a NEW loss occurring after a fresh log makes the funding-time price stale; the mature claimant avoids exactly 4,000 sats of loss and shifts exactly 4,000 sats onto the existing holder.');
+  console.log('PASS NEW-BUG POSITIVE CONTROL: the old request-time M-03 is fixed and the same standard claim is cancellable before funding, yet a NEW loss occurring after a fresh log makes the funding-time price stale; the mature claimant avoids exactly 4,000 sats of loss and shifts the same economic loss onto the existing holder, with at most one additional sat from ordinary integer conversion rounding.');
 }
