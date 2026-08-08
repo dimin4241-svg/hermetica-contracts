@@ -23,8 +23,5 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Generate Clarigen types
-        run: npm run clarigen
-
       - name: Run security validation PoCs
         run: npm test -- tests/security/
