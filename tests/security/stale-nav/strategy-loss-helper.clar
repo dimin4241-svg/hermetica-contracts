@@ -10,6 +10,6 @@
 
 (define-public (realize-loss (amount uint) (sink principal))
   (as-contract? ((with-ft sbtc-token "*" amount))
-    (contract-call? sbtc-token transfer amount current-contract sink none)
+    (try! (contract-call? sbtc-token transfer amount current-contract sink none))
   )
 )
