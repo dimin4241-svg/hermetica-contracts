@@ -85,8 +85,7 @@ path = '../../../mainnet/contracts/usdh/protocol/redeeming-reserve-v1-2.clar'
 clarity_version = 2
 epoch = 3.2
 
-# hBTC production contracts needed to validate the same tx-sender transfer
-# behavior directly against the bounty's in-scope token.
+# hBTC production contracts used by the security validations.
 [contracts.hq-hbtc]
 path = '../../../mainnet/contracts/hbtc/protocol/hq-v1.clar'
 clarity_version = 4
@@ -99,5 +98,10 @@ epoch = 3.3
 
 [contracts.token-hbtc]
 path = '../../../mainnet/contracts/hbtc/tokens/token-hbtc.clar'
+clarity_version = 4
+epoch = 3.3
+
+[contracts.state]
+path = '../../../mainnet/contracts/hbtc/protocol/state-v1.clar'
 clarity_version = 4
 epoch = 3.3
