@@ -77,13 +77,12 @@ console.log('\n=== TRIAGER CONTROL A: exact old M-03 request-time lock-in is fix
   x.expect('external loss becomes real BEFORE request', x.pub('strategy-loss-helper', 'realize-loss', [Cl.uint(LOSS), Cl.principal(x.deployer)], x.deployer), '(ok true)');
   assert.equal(x.price(), BASE, 'accounting price is stale when request is created');
 
-  // This reproduces the old M-03 premise: request is created while the accounting price still ignores loss.
   x.expect('request redeem while NAV is stale', x.pub('vault', 'request-redeem', [Cl.uint(ATTACKER_SHARES), Cl.bool(false)], x.attacker), '(ok u1)');
   const requested = x.ro('vault', 'get-claim', [Cl.uint(1)], x.attacker);
   const requestedText = text(requested);
   console.log(`claim immediately after request: ${requestedText}`);
-  assert.match(requestedText, /assets: none/, 'current remediation must not lock an asset amount at request time');
-  assert.match(requestedText, /share-price: none/, 'current remediation must not lock share price at request time');
+  assert.match(requestedText, /\(assets none\)/, 'current remediation must not lock an asset amount at request time');
+  assert.match(requestedText, /\(share-price none\)/, 'current remediation must not lock share price at request time');
 
   x.simnet.mineEmptyBlocks(500);
   x.expect('reconcile the 1bp loss before funding', x.pub('controller-hbtc', 'log-reward', [Cl.uint(LOSS), Cl.bool(false)], x.rewarder), '(ok true)');
@@ -104,7 +103,6 @@ console.log('\n=== TRIAGER CONTROL B: mature standard claim is a cancellable pre
   x.expect('cancel mature unfunded claim #1', x.pub('vault', 'cancel-redeem', [Cl.uint(1)], x.attacker), '(ok u40000000)');
   assert.equal(x.hbtc(x.attacker), ATTACKER_SHARES, 'all shares are returned after cancellation');
 
-  // Re-arm. This shows the attacker need not predict the adverse event before the first cooldown expires.
   x.expect('re-arm standard claim #2', x.pub('vault', 'request-redeem', [Cl.uint(ATTACKER_SHARES), Cl.bool(false)], x.attacker), '(ok u2)');
   x.simnet.mineEmptyBlocks(500);
 
