@@ -108,18 +108,43 @@ assert.equal(price(), BASE);
 console.log('=== make NAV fresh, then realize a loss immediately afterwards ===');
 expect('deploy 1 sBTC to external strategy', pub('strategy-loss-helper', 'pull-from-reserve', [Cl.uint(BASE)], deployer), '(ok true)');
 expect('fresh NAV log', pub('controller-hbtc', 'log-reward', [Cl.uint(0), Cl.bool(true)], rewarder), '(ok true)');
+const freshLastLogTs = u(ro('state', 'get-last-log-ts'));
+expect(
+  'PR137 exact timestamp guard immediately after fresh log',
+  ro('pr137-shadow', 'is-sp-stale', [Cl.uint(freshLastLogTs)]),
+  'false',
+);
+
 expect('realize 6bps loss', pub('strategy-loss-helper', 'realize-loss', [Cl.uint(LOSS), Cl.principal(deployer)], deployer), '(ok true)');
 assert.equal(sbtc(helper), BASE - LOSS);
+
+// This is the crucial duplicate/fix distinction: the economic NAV is now stale,
+// but PR #137's exact timestamp-only predicate still says the share price is fresh.
+expect(
+  'PR137 exact timestamp guard after realized external loss',
+  ro('pr137-shadow', 'is-sp-stale', [Cl.uint(freshLastLogTs)]),
+  'false',
+);
 
 // The economic loss is already real, but unchanged production accounting cannot
 // recognize the 6bps delta: it is one basis point above max-reward=5.
 expect('immediate 6bps negative update exceeds cap', pub('controller-hbtc', 'log-reward', [Cl.uint(LOSS), Cl.bool(false)], rewarder), '(err u102009)');
 assert.equal(price(), BASE);
+expect(
+  'PR137 guard remains false while corrective accounting is blocked',
+  ro('pr137-shadow', 'is-sp-stale', [Cl.uint(freshLastLogTs)]),
+  'false',
+);
 
 console.log('=== later depositor supplies fresh principal at stale pre-loss NAV ===');
 expect('victim stale deposit', pub('vault', 'deposit', [Cl.uint(VICTIM_DEPOSIT), Cl.none()], victim), '(ok u40000000)');
 assert.equal(sbtc(reserve), VICTIM_DEPOSIT);
 assert.equal(hbtc(victim), VICTIM_DEPOSIT);
+expect(
+  'PR137 guard still allows the stale-price deposit window',
+  ro('pr137-shadow', 'is-sp-stale', [Cl.uint(freshLastLogTs)]),
+  'false',
+);
 
 console.log('=== matured claimant consumes that principal at the same stale NAV ===');
 expect('fund old matured claim', pub('vault', 'fund-claim', [Cl.uint(1)], attacker), '(ok u40000000)');
@@ -163,4 +188,4 @@ assert.equal(victimValue, 39_976_000n);
 assert.equal(victimLoss, 24_000n);
 assert.equal(attackerExcess, victimLoss);
 
-console.log('PASS LIVE-LIMIT VALUE TRANSFER: with max-reward=5bps, max-deviation=7bps and update-window=86340s unchanged, a 6bps realized loss lets a matured claimant avoid exactly 24,000 sats of loss, and a later depositor loses exactly the same 24,000 sats after full reconciliation.');
+console.log('PASS LIVE-LIMIT VALUE TRANSFER: with max-reward=5bps, max-deviation=7bps and update-window=86340s unchanged, a 6bps realized loss lets a matured claimant avoid exactly 24,000 sats of loss, and a later depositor loses exactly the same 24,000 sats after full reconciliation. PR #137 exact timestamp-only staleness logic remains false during the exploit window.');
