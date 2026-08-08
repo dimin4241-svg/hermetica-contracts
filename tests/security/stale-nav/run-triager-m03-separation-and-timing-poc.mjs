@@ -72,7 +72,9 @@ async function setup({ strategyCapital = BASE } = {}) {
 
 console.log('\n=== TRIAGER CONTROL A: exact old M-03 request-time lock-in is fixed ===');
 {
-  const x = await setup({ strategyCapital: BASE });
+  // Keep 0.50 sBTC in Reserve so the control proves a successful corrected payout,
+  // rather than stopping at a correct process-claim calculation with insufficient liquidity.
+  const x = await setup({ strategyCapital: 50_000_000n });
   x.expect('fresh NAV log', x.pub('controller-hbtc', 'log-reward', [Cl.uint(0), Cl.bool(true)], x.rewarder), '(ok true)');
   x.expect('external loss becomes real BEFORE request', x.pub('strategy-loss-helper', 'realize-loss', [Cl.uint(LOSS), Cl.principal(x.deployer)], x.deployer), '(ok true)');
   assert.equal(x.price(), BASE, 'accounting price is stale when request is created');
