@@ -1,0 +1,72 @@
+[project]
+name = 'hermetica-hbtc-stale-nav-poc'
+description = 'Local-only stale NAV validation using unchanged production hBTC contracts'
+authors = []
+telemetry = false
+cache_dir = '.cache-stale-nav'
+
+[[project.requirements]]
+contract_id = 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token'
+
+[[project.requirements]]
+contract_id = 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-withdrawal'
+
+[contracts.sip-010-trait]
+path = '../../../mainnet/contracts/usdh/traits/sip-010-trait.clar'
+clarity_version = 2
+epoch = 2.5
+
+[contracts.vault-trait-v1]
+path = '../../../mainnet/contracts/hbtc/traits/vault-trait-v1.clar'
+clarity_version = 4
+epoch = 3.3
+
+[contracts.hq-hbtc]
+path = '../../../mainnet/contracts/hbtc/protocol/hq-v1.clar'
+clarity_version = 4
+epoch = 3.3
+
+[contracts.blacklist]
+path = '../../../mainnet/contracts/hbtc/protocol/blacklist-v1.clar'
+clarity_version = 4
+epoch = 3.3
+
+[contracts.token-hbtc]
+path = '../../../mainnet/contracts/hbtc/tokens/token-hbtc.clar'
+clarity_version = 4
+epoch = 3.3
+
+[contracts.state]
+path = '../../../mainnet/contracts/hbtc/protocol/state-v1.clar'
+clarity_version = 4
+epoch = 3.3
+
+[contracts.reserve]
+path = '../../../mainnet/contracts/hbtc/protocol/reserve-v1.clar'
+clarity_version = 4
+epoch = 3.3
+
+[contracts.reserve-fund]
+path = '../../../mainnet/contracts/hbtc/protocol/reserve-fund-v1.clar'
+clarity_version = 4
+epoch = 3.3
+
+[contracts.fee-collector]
+path = '../../../mainnet/contracts/hbtc/protocol/fee-collector-v1.clar'
+clarity_version = 4
+epoch = 3.3
+
+[contracts.controller-hbtc]
+path = '../../../mainnet/contracts/hbtc/protocol/controller-v1.clar'
+clarity_version = 4
+epoch = 3.3
+
+[contracts.vault]
+path = '../../../mainnet/contracts/hbtc/protocol/vault-v1-2.clar'
+clarity_version = 4
+epoch = 3.3
+
+[contracts.strategy-loss-helper]
+path = 'strategy-loss-helper.clar'
+clarity_version = 4
+epoch = 3.3
