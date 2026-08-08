@@ -41,6 +41,9 @@ jobs:
       - name: Run existing-holder stale loss-shift PoC
         run: node tests/security/stale-nav/run-live-limits-existing-holder-loss-shift-poc.mjs
 
+      - name: Run reserve-fund buffered stale loss-shift PoC
+        run: node tests/security/stale-nav/run-reserve-fund-buffer-loss-shift-poc.mjs
+
       - name: Read live hBTC accounting and reachability controls
         run: node tests/security/standalone/read-live-hbtc-controls.mjs
 
