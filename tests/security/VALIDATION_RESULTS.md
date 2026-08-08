@@ -5,6 +5,7 @@ Validation branch: `validation-susdh-donation-poc`
 Latest focused ordering run: `31261693979` (job `93113404828`) — **PASS**.
 Earlier full exploit run `31251184001` (job `93087699646`) — **PASS**.
 Historical migration snapshot run `31261478319` (job `93112871251`) — **PASS**.
+Current sUSDh holder snapshot run `31261931663` (job `93113992227`) — **PASS**.
 
 The exploit tests use a local Clarinet/Simnet manifest that points directly to unchanged production source files under `mainnet/contracts/`. No exploit transaction was sent to mainnet or public testnet. Historical/current mainnet evidence was gathered read-only through public Hiro API endpoints.
 
@@ -51,6 +52,30 @@ Read-only state captured on 2026-08-08:
 - current `get-usdh-per-susdh`: `u125293296` = approximately **1.25293296 USDh/sUSDh**
 
 At this state, ordinary integer-rounding loss is less than the value of one raw sUSDh unit, roughly `1.25293296e-8 USDh`. Inflating one raw share enough to remove material value from a later deposit requires an enormous increase in total reserve backing because the ratio is global over more than 1.071 million whole sUSDh. The low-liquidity 250 USDh PoC therefore does not establish a presently economical mainnet attack.
+
+### Current supply-concentration / supply-shrink counter-check
+
+A second read-only mainnet probe enumerated current sUSDh holders to test whether an attacker could first acquire and burn most existing sUSDh, reduce global supply, and then make the donation manipulation inexpensive.
+
+Observed current state:
+
+- total holders: **1,748**
+- total sUSDh supply: **1,071,103.64114752 sUSDh**
+- largest holder: `SP3WSE1568VCA416D3124KRMSN5JGB43YJW2VVYH2`
+- largest-holder balance: **823,349.57831525 sUSDh**
+- largest-holder share: **76.8692% of total supply**
+
+The dominant holder is a standard Stacks principal rather than a contract principal (`address.contract-name`), so it is not an hBTC reserve/strategy contract or a permissionless AMM/lending contract that an attacker can call to access the position.
+
+The holder set does contain public AMM contracts, but their balances are tiny relative to global supply:
+
+- `SM1793C4R5PZ4NS4VQ4WMP7SKKYVH8JZEWSZ9HCCR.stableswap-pool-usdh-susdh-v-1-4`: **146.53938054 sUSDh**
+- `SP2ZNGJ85ENDY6QRHQ5P2D4FXKGZWCKTB2T0Z55KS.welsh-susdh-amm-lp-v1`: **99.55814441 sUSDh**
+- combined identified AMM-held sUSDh: about **246.09752495 sUSDh**, only about **0.023%** of current total supply.
+
+Repository/docs/market checks did not identify a current permissionless sUSDh lending/flash-borrow market capable of sourcing anywhere near the hundreds of thousands of sUSDh required to collapse global supply materially.
+
+Therefore the hoped-for current-state workaround — `borrow/acquire most sUSDh -> unstake/burn -> donation attack against tiny remaining supply` — is not supported by current on-chain liquidity. The current large supply remains a material economic blocker.
 
 ### Historical v1 -> v1.1 migration reconstruction
 
@@ -175,9 +200,9 @@ The current hBTC controller contains explicit negative-reward/loss handling and 
 
 ## Final submission ranking after adversarial validation
 
-1. **#3 — only clearly distinct protocol logic primitive:** executable and apparently non-duplicate, but meaningful current-mainnet impact is not established because of the large live sUSDh supply. Historical empty-new-reserve exploitability was specifically disproven; the separate dual-version window belongs to known H-01.
+1. **#3 — only clearly distinct protocol logic primitive:** executable and apparently non-duplicate, but meaningful current-mainnet impact is not established because of the large live sUSDh supply. Historical empty-new-reserve exploitability was specifically disproven; the separate dual-version window belongs to known H-01; and current public AMM liquidity cannot materially shrink supply.
 2. **#6 — strongest raw hBTC asset impact:** executable 1 hBTC nested-call theft, but the required malicious-contract interaction and SIP-010/audit precedent make a bounty rejection likely.
 3. **#5 — strong technical USDh reserve drain:** fully executable, but wrong current product/governance model and privileged/social prerequisite.
 4. **#4 — do not submit.**
 
-If optimizing strictly for expected current Hermetica bounty payout, none of #3/#5/#6 is yet a clean High/Critical submission. #3 is the best candidate to continue researching because its root cause is distinct and permissionless; the missing element is a currently reachable way to make the global sUSDh ratio manipulation economically material without requiring impossible USDh amounts or a state already covered by audit H-01.
+If optimizing strictly for expected current Hermetica bounty payout, none of #3/#5/#6 is yet a clean High/Critical submission. #3 remains the best candidate only because its root cause is distinct and permissionless; the missing element is a currently reachable way to make the global sUSDh ratio manipulation economically material without requiring impossible USDh amounts, control over the dominant standard-principal holder, or a state already covered by audit H-01.
