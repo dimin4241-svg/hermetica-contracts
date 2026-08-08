@@ -1,4 +1,4 @@
-name: sUSDh Donation Security PoC
+name: Hermetica Security Validation PoCs
 
 on:
   push:
@@ -26,5 +26,5 @@ jobs:
       - name: Generate Clarigen types
         run: npm run clarigen
 
-      - name: Run sUSDh donation PoC
-        run: npm test -- tests/security/susdh-donation-poc.test.ts
+      - name: Run security validation PoCs
+        run: npm test -- tests/security/
