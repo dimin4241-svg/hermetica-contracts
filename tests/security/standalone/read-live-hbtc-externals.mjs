@@ -1,0 +1,55 @@
+import { Cl, deserializeCV, cvToString } from '@stacks/transactions';
+
+const API = 'https://api.hiro.so';
+const HBTC = 'SP1S1HSFH0SQQGWKB69EYFNY0B1MHRMGXR3J1FH4D';
+const STATE = `${HBTC}.state-hbtc-v1`;
+
+const known = {
+  'zest-v0-3-market': 'SP1A27KFY4XERQCCRCARCYD1CC5N7M6688BSYADJ7.v0-3-market',
+  'zest-v0-market-vault': 'SP1A27KFY4XERQCCRCARCYD1CC5N7M6688BSYADJ7.v0-market-vault',
+  'zest-v0-vault-sbtc': 'SP1A27KFY4XERQCCRCARCYD1CC5N7M6688BSYADJ7.v0-vault-sbtc',
+  'zest-v0-vault-usdh': 'SP1A27KFY4XERQCCRCARCYD1CC5N7M6688BSYADJ7.v0-vault-usdh',
+  'granite-borrower-v1': 'SP26NGV9AFZBX7XBDBS2C7EC7FCPSAV9PKREQNMVS.borrower-v1',
+  'hermetica-staking-v1-1': 'SPN5AKG35QZSK2M8GAMR4AFX45659RJHDW353HSG.staking-v1-1',
+  'hermetica-staking-silo-v1-1': 'SPN5AKG35QZSK2M8GAMR4AFX45659RJHDW353HSG.staking-silo-v1-1',
+  'hermetica-minting-auto-v1-2': 'SPN5AKG35QZSK2M8GAMR4AFX45659RJHDW353HSG.minting-auto-v1-2',
+};
+
+async function req(url, options = {}) {
+  const r = await fetch(url, { ...options, headers: { Accept: 'application/json', ...(options.body ? {'Content-Type':'application/json'} : {}) } });
+  const text = await r.text();
+  if (!r.ok) throw new Error(`${r.status} ${url}: ${text.slice(0,1200)}`);
+  return text ? JSON.parse(text) : null;
+}
+function argHex(cv) { return '0x' + Cl.serialize(cv); }
+async function callRead(fn, args=[]) {
+  const j = await req(`${API}/v2/contracts/call-read/${HBTC}/state-hbtc-v1/${fn}`, {
+    method:'POST', body: JSON.stringify({sender:HBTC, arguments:args.map(argHex)})
+  });
+  if (!j.okay) return {okay:false,raw:j};
+  return {okay:true,repr:cvToString(deserializeCV(j.result))};
+}
+
+const knownState = {};
+for (const [name,address] of Object.entries(known)) {
+  knownState[name] = { address, result: await callRead('get-external',[Cl.principal(address)]) };
+}
+
+const calls = [];
+for (let offset=0; offset<500; offset+=50) {
+  const j = await req(`${API}/extended/v1/address/${encodeURIComponent(STATE)}/transactions?limit=50&offset=${offset}`);
+  for (const tx of j.results ?? []) {
+    const cc = tx.contract_call;
+    if (!cc || cc.contract_id !== STATE) continue;
+    if (!['request-external-add','request-external-remove','confirm-external-request','cancel-external-request'].includes(cc.function_name)) continue;
+    calls.push({
+      tx_id:tx.tx_id, block_height:tx.block_height, block_time_iso:tx.block_time_iso,
+      status:tx.tx_status, sender:tx.sender_address, fn:cc.function_name,
+      args:(cc.function_args??[]).map(a=>({name:a.name,repr:a.repr})), result:tx.tx_result?.repr,
+    });
+  }
+  if ((j.results??[]).length < 50) break;
+}
+
+console.log('LIVE_HBTC_KNOWN_EXTERNALS='+JSON.stringify(knownState));
+console.log('LIVE_HBTC_EXTERNAL_OPS='+JSON.stringify(calls));
