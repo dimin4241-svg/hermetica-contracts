@@ -16,6 +16,7 @@ const ATTACKER_DEPOSIT = 40_000_000n;
 const LEGACY_DEPOSIT = 60_000_000n;
 const LOSS = 10_000_000n;
 const VICTIM_DEPOSIT = 40_000_000n;
+const PR137_WINDOW = 86_400n;
 const SBTC = 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token';
 const c = (name) => `${deployer}.${name}`;
 const vault = c('vault');
@@ -53,6 +54,9 @@ function hbtcBalance(who) {
 function sharePrice() { return uintFrom(ro('state', 'get-share-price')); }
 function totalAssets() { return uintFrom(ro('state', 'get-total-assets')); }
 function supply() { return uintFrom(ro('token-hbtc', 'get-total-supply')); }
+function lastLogTs() { return uintFrom(ro('state', 'get-last-log-ts')); }
+function currentTs() { return uintFrom(ro('pr137-shadow', 'get-current-ts')); }
+function pr137IsStale(logTs) { return text(ro('pr137-shadow', 'is-sp-stale', [Cl.uint(logTs)])); }
 
 function requestRole(fn, address) {
   expectCv(`hq.${fn}(${address})`, pub('hq-hbtc', fn, [Cl.principal(address), Cl.bool(true)], deployer), '(ok true)');
@@ -109,6 +113,13 @@ assert.equal(sbtcBalance(reserve), 0n);
 assert.equal(sbtcBalance(helper), BASE);
 expectCv('fresh NAV log', pub('controller-hbtc', 'log-reward', [Cl.uint(0), Cl.bool(true)], rewarder), '(ok true)');
 assert.equal(sharePrice(), BASE);
+const freshLogTs = lastLogTs();
+const tsAtFreshLog = currentTs();
+console.log(`fresh last-log-ts: ${freshLogTs}`);
+console.log(`current ts after fresh log: ${tsAtFreshLog}`);
+assert.ok(tsAtFreshLog >= freshLogTs);
+assert.ok(tsAtFreshLog - freshLogTs < PR137_WINDOW);
+assert.equal(pr137IsStale(freshLogTs), 'false', 'PR #137 must consider a freshly logged share price non-stale');
 
 console.log('=== realized external loss while hBTC accounting remains stale ===');
 expectCv('external strategy realizes 0.10 sBTC loss', pub('strategy-loss-helper', 'realize-loss', [Cl.uint(LOSS), Cl.principal(deployer)], deployer), '(ok true)');
@@ -117,7 +128,18 @@ expectCv('immediate negative NAV update is blocked', pub('controller-hbtc', 'log
 assert.equal(totalAssets(), BASE);
 assert.equal(sharePrice(), BASE);
 
+// Exact counterfactual against PR #137. That PR proposed only a timestamp predicate:
+// is-sp-stale := current_time >= last-log-ts + 86400.
+// The loss occurred AFTER a fresh log, so the timestamp remains fresh even though NAV is economically wrong.
+const tsAfterLoss = currentTs();
+const secondsSinceFreshLogAtLoss = tsAfterLoss - freshLogTs;
+console.log(`PR137 shadow: seconds since fresh log after realized loss = ${secondsSinceFreshLogAtLoss}`);
+console.log(`PR137 shadow: is-sp-stale after realized loss = ${pr137IsStale(freshLogTs)}`);
+assert.ok(secondsSinceFreshLogAtLoss < PR137_WINDOW);
+assert.equal(pr137IsStale(freshLogTs), 'false', 'PR #137 would NOT block operations immediately after a post-log realized loss');
+
 console.log('=== normal third-party deposit supplies fresh reserve liquidity at stale NAV ===');
+assert.equal(pr137IsStale(freshLogTs), 'false', 'PR #137 guard would allow the victim deposit');
 expectCv('victim deposits 0.40 after loss', pub('vault', 'deposit', [Cl.uint(VICTIM_DEPOSIT), Cl.none()], victim), '(ok u40000000)');
 assert.equal(sbtcBalance(reserve), VICTIM_DEPOSIT);
 assert.equal(hbtcBalance(victim), VICTIM_DEPOSIT);
@@ -126,6 +148,7 @@ assert.equal(supply(), 140_000_000n);
 assert.equal(sharePrice(), BASE);
 
 console.log('=== matured claimant captures the new deposit at stale pre-loss NAV ===');
+assert.equal(pr137IsStale(freshLogTs), 'false', 'PR #137 guard would allow stale fund-claim in the exploit window');
 expectCv('permissionless fund matured claim', pub('vault', 'fund-claim', [Cl.uint(1)], attacker), '(ok u40000000)');
 assert.equal(sbtcBalance(reserve), 0n, 'new depositor liquidity has been moved into old claimant escrow');
 expectCv('attacker redeems funded claim', pub('vault', 'redeem', [Cl.uint(1)], attacker), '(ok u40000000)');
@@ -162,4 +185,5 @@ assert.equal(victimValue, 36_000_000n);
 assert.equal(victimLoss, 4_000_000n);
 assert.equal(attackerExcess, victimLoss);
 
+console.log('PASS PR137 COUNTERFACTUAL: PR #137 timestamp staleness remains false after a fresh-log strategy loss, so it would allow both the victim deposit and stale fund-claim.');
 console.log('PASS: a realized external loss + time-gated NAV update lets a matured claimant capture 0.04 sBTC of a later depositor value at stale NAV.');
