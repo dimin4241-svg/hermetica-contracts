@@ -75,6 +75,10 @@ jobs:
         if: always()
         run: node tests/security/standalone/read-live-hbtc-negative-reward-history.mjs
 
+      - name: Scan production hBTC positive reward history
+        if: always()
+        run: node tests/security/standalone/read-live-hbtc-positive-reward-history.mjs
+
       - name: Prove deployed Zest v0-4 liquidation source semantics
         if: always()
         run: node tests/security/standalone/read-zest-v04-liquidation-source.mjs
