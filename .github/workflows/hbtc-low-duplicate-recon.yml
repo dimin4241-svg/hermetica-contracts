@@ -1,0 +1,39 @@
+name: hBTC Low-Duplicate Recon
+
+on:
+  push:
+    branches:
+      - validation-susdh-donation-poc
+    paths:
+      - 'tests/security/standalone/read-live-hbtc-retired-vault-claims.mjs'
+      - 'tests/security/standalone/read-live-hbtc-all-roles.mjs'
+      - '.github/workflows/hbtc-low-duplicate-recon.yml'
+  workflow_dispatch:
+
+jobs:
+  recon:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+
+      - name: Reconstruct every live hBTC role
+        run: node tests/security/standalone/read-live-hbtc-all-roles.mjs
+
+      - name: Scan retired vaults for stranded express claims
+        run: node tests/security/standalone/read-live-hbtc-retired-vault-claims.mjs
+
+      - name: Upload low-duplicate recon evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hbtc-low-duplicate-recon
+          path: |
+            tests/security/evidence/live-hbtc-all-roles.json
+            tests/security/evidence/live-hbtc-retired-vault-claims.json
+          if-no-files-found: warn
