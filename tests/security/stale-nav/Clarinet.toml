@@ -70,3 +70,8 @@ epoch = 3.3
 path = 'strategy-loss-helper.clar'
 clarity_version = 4
 epoch = 3.3
+
+[contracts.pr137-shadow]
+path = 'pr137-shadow.clar'
+clarity_version = 4
+epoch = 3.3
