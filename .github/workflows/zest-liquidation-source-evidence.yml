@@ -22,9 +22,14 @@ jobs:
       - name: Prove deployed Zest v0-4 liquidation semantics
         run: node tests/security/standalone/read-zest-v04-liquidation-source.mjs
 
+      - name: Extract deployed Zest egroup liquidation parameter interface
+        run: node tests/security/standalone/read-zest-v04-egroup-source.mjs
+
       - name: Upload deployed-source evidence
         uses: actions/upload-artifact@v4
         with:
           name: zest-v04-liquidation-source
-          path: tests/security/evidence/zest-v04-liquidation-source.txt
+          path: |
+            tests/security/evidence/zest-v04-liquidation-source.txt
+            tests/security/evidence/zest-v04-egroup-source.txt
           if-no-files-found: error
