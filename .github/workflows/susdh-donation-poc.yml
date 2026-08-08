@@ -59,13 +59,9 @@ jobs:
       - name: Read live hBTC / Zest position state
         run: node tests/security/standalone/read-live-hbtc-risk.mjs
 
-      - name: Reconstruct live hBTC external registry
+      - name: Prove deployed Zest v0-4 liquidation source semantics
         if: always()
-        run: node tests/security/standalone/read-live-hbtc-externals.mjs
-
-      - name: Reconstruct live hBTC protocol roles
-        if: always()
-        run: node tests/security/standalone/read-live-hbtc-protocol-roles.mjs
+        run: node tests/security/standalone/read-zest-v04-liquidation-source.mjs
 
       - name: Upload compact Zest deployed-source evidence
         if: always()
@@ -74,3 +70,11 @@ jobs:
           name: zest-v04-liquidation-source
           path: tests/security/evidence/zest-v04-liquidation-source.txt
           if-no-files-found: error
+
+      - name: Reconstruct live hBTC external registry
+        if: always()
+        run: node tests/security/standalone/read-live-hbtc-externals.mjs
+
+      - name: Reconstruct live hBTC protocol roles
+        if: always()
+        run: node tests/security/standalone/read-live-hbtc-protocol-roles.mjs
