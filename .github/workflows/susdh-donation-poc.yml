@@ -1,0 +1,30 @@
+name: sUSDh Donation Security PoC
+
+on:
+  push:
+    branches:
+      - validation-susdh-donation-poc
+  workflow_dispatch:
+
+jobs:
+  poc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout validation branch
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Clarigen types
+        run: npm run clarigen
+
+      - name: Run sUSDh donation PoC
+        run: npm test -- tests/security/susdh-donation-poc.test.ts
