@@ -86,3 +86,15 @@ jobs:
           name: live-hbtc-protocol-roles
           path: tests/security/evidence/live-hbtc-protocol-roles.json
           if-no-files-found: error
+
+      - name: Scan live hBTC custom fee and cooldown overrides
+        if: always()
+        run: node tests/security/standalone/read-live-hbtc-custom-overrides.mjs
+
+      - name: Upload live hBTC custom override evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-hbtc-custom-overrides
+          path: tests/security/evidence/live-hbtc-custom-overrides.json
+          if-no-files-found: error
