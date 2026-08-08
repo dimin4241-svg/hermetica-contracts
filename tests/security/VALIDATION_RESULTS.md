@@ -2,13 +2,15 @@
 
 Validation branch: `validation-susdh-donation-poc`
 
-Latest complete GitHub Actions run: `31251184001` (job `93087699646`) — **PASS**.
+Latest focused ordering run: `31261693979` (job `93113404828`) — **PASS**.
+Earlier full exploit run `31251184001` (job `93087699646`) — **PASS**.
+Historical migration snapshot run `31261478319` (job `93112871251`) — **PASS**.
 
-The exploit tests use a local Clarinet/Simnet manifest that points directly to unchanged production source files under `mainnet/contracts/`. No exploit transaction was sent to mainnet or public testnet. The workflow also performs a read-only API query to record current public staking state.
+The exploit tests use a local Clarinet/Simnet manifest that points directly to unchanged production source files under `mainnet/contracts/`. No exploit transaction was sent to mainnet or public testnet. Historical/current mainnet evidence was gathered read-only through public Hiro API endpoints.
 
 ## Finding #3 — sUSDh reserve donation / share-price inflation
 
-**Technical disposition: dynamically confirmed.**
+**Technical disposition: dynamically confirmed. Distinct direct-donation root cause remains present; meaningful current-mainnet impact has not been established.**
 
 Production behavior exercised:
 
@@ -41,16 +43,53 @@ Runner final assertion:
 
 ### Current mainnet feasibility check
 
-Read-only state captured by the same successful workflow at `2026-08-08T09:43:24.244Z`:
+Read-only state captured on 2026-08-08:
 
 - staking reserve: `SPN5AKG35QZSK2M8GAMR4AFX45659RJHDW353HSG.staking-reserve-v1`
 - USDh reserve balance raw: `134202105895456` = **1,342,021.05895456 USDh**
 - sUSDh total supply raw: `107110364114752` = **1,071,103.64114752 sUSDh**
 - current `get-usdh-per-susdh`: `u125293296` = approximately **1.25293296 USDh/sUSDh**
 
-At this state, ordinary integer-rounding loss is less than the value of one raw sUSDh unit, roughly `1.25293296e-8 USDh`. Inflating one raw share so that rounding alone can remove even 1 USDh from a later deposit would require an exchange rate around `1e8 USDh/sUSDh`, implying a donation on the order of `1.071e14 USDh` at the observed supply. Reproducing the 250 USDh rounding loss from the low-liquidity PoC at the current supply would require a donation on the order of `2.678e16 USDh`.
+At this state, ordinary integer-rounding loss is less than the value of one raw sUSDh unit, roughly `1.25293296e-8 USDh`. Inflating one raw share enough to remove material value from a later deposit requires an enormous increase in total reserve backing because the ratio is global over more than 1.071 million whole sUSDh. The low-liquidity 250 USDh PoC therefore does not establish a presently economical mainnet attack.
 
-Therefore the vulnerable primitive is real and executable, but the demonstrated profit path is a **low-liquidity / near-empty-pool state attack**, not a presently economical mainnet exploit at the observed state.
+### Historical v1 -> v1.1 migration reconstruction
+
+The historical on-chain sequence was reconstructed read-only to test whether the near-empty-reserve PoC corresponded to an actual public migration window.
+
+Immediately before and at deployment of `staking-v1-1`:
+
+- block `3567257`: old staking backing `251323307744674` raw = **2,513,233.07744674 USDh**; new reserve `0`; global sUSDh supply `212209174140002` raw = **2,122,091.74140002 sUSDh**; old ratio `1.18431876`; hypothetical empty-reserve fallback ratio `1.0`.
+- block `3567258`: `staking-v1-1` deployed; balances/supply unchanged and new reserve still `0`.
+- through block `3567400`: new reserve still `0` while all backing remained in old staking.
+
+The actual migration transaction was then identified exactly:
+
+- block `3567404`, tx `0xe318c9...`: `emergency-recover-v1.recover-usdh(staking-v1, staking-reserve-v1)`.
+- event 0 burns **exactly `251323307744674` raw USDh** from old `staking-v1`.
+- event 1 mints **exactly `251323307744674` raw USDh** to new `staking-reserve-v1`.
+
+Only after that full backing migration:
+
+- block `3567458`: `hq-v1.activate-minting-contract(staking-v1-1)` succeeds.
+- block `3567490`: new `staking-silo-v1-1` is activated as protocol.
+- block `3567765`: first observed successful public v1.1 stake, 10 USDh, executes at the restored ratio `u118431876` = **1.18431876**.
+- block `3567784`: second observed public stake, 3 USDh, also uses `1.18431876`.
+
+Therefore **the new v1.1 staking contract was not capable of minting sUSDh before the backing migration**. The specific historical scenario “new public staking opens with an empty reserve” is disproven.
+
+There was, however, a separate window where the *old* `staking-v1` remained a registered minting contract until block `3567908`, after backing had already been moved and after v1.1 was activated. That is exactly the separate-version/shared-supply class covered by the September 2025 audit H-01. It must not be presented as a new finding.
+
+### Audit / duplicate separation
+
+The September 2025 USDh Upgrade audit H-01 concerned **two staking contract versions sharing one global sUSDh supply while using separate backing balances** and prescribed a migration/activation sequence. That is a different source from this finding.
+
+The current direct-donation source is:
+
+`ordinary permissionless USDh SIP-010 transfer -> staking-reserve raw balance increases -> get-usdh-per-susdh increases -> later stake floors shares`.
+
+The audit report does not describe a donation/inflation/direct-transfer attack into the reserve. Upstream searches also found no PR/commit dedicated to donation inflation. PR #36 only hardened **outgoing** `staking-reserve.transfer()` authorization; it cannot prevent an ordinary holder from transferring USDh **into** the reserve principal through `usdh-token.transfer()`.
+
+So the donation primitive is not an obvious duplicate of H-01 or PR #36. The remaining weakness is impact/feasibility at the current large supply, not technical existence or deduplication.
 
 ## Finding #5 — pending-admin `tx-sender` confused deputy -> reserve drain
 
@@ -83,11 +122,11 @@ Runner final assertion:
 
 Current production `mainnet/contracts/hbtc/protocol/hq-v1.clar` authenticates privileged setters through `contract-caller` rather than the USDh HQ's preserved `tx-sender` pattern. Therefore this exact privilege-escalation chain does **not** transfer to the current hBTC HQ.
 
-**Bounty caveat:** exploitation requires a legitimately nominated pending admin to invoke an attacker-controlled contract after the activation delay; the current Hermetica bounty is specifically presented as an hBTC product bounty and excludes phishing/social-engineering impacts. Treat #5 as a technically valid USDh issue but a poor current bounty submission.
+**Bounty caveat:** exploitation requires a legitimately nominated pending admin to invoke an attacker-controlled contract after the activation delay. The current Immunefi program describes hBTC as its single product in scope and excludes impacts requiring privileged-address access and phishing/social engineering. Treat #5 as a technically valid USDh issue but not a good current Hermetica bounty submission.
 
 ## Finding #6 — `tx-sender` token theft through nested contract
 
-**Technical disposition: dynamically confirmed on USDh, sUSDh, and now directly on the production hBTC token that is part of the hBTC codebase.**
+**Technical disposition: dynamically confirmed on USDh, sUSDh, and directly on production hBTC token; not upgraded to a non-phishing Hermetica exploit path.**
 
 The production token transfers authorize a transfer when supplied `sender` equals either `tx-sender` or `contract-caller`. A malicious contract invoked by a token holder can preserve the holder as `tx-sender` and call the token contract with the victim as `sender`, without any allowance.
 
@@ -100,19 +139,14 @@ The production token transfers authorize a transfer when supplied `sender` equal
 - attacker final USDh: `u10000000000` = 100 USDh
 - attacker final sUSDh: `u10000000000` = 100 sUSDh
 
-Runner assertion:
-
-`PASS #6: victim calling one malicious contract transfers 100 USDh + 100 sUSDh to attacker without allowance.`
-
 ### In-scope hBTC token runtime
 
 A second PoC uses unchanged production hBTC contracts (`hq-v1.clar`, `blacklist-v1.clar`, `token-hbtc.clar`). Local funding is established through the real timelocked hBTC PROTOCOL-role flow, then the victim holds exactly 1 hBTC.
 
 - victim hBTC before: `u100000000` = 1.00000000 hBTC
 - attacker hBTC before: `u0`
-- attacker deploys `evil-hbtc-router`: success
 - victim invokes only `evil-hbtc-router.steal-hbtc`
-- nested `token-hbtc.transfer(amount, tx-sender, attacker, none)` returns `(ok true)`
+- nested `token-hbtc.transfer(amount, tx-sender, attacker, none)` succeeds
 - victim hBTC after: `u0`
 - attacker hBTC after: `u100000000` = **1.00000000 hBTC**
 
@@ -120,11 +154,18 @@ Runner final assertion:
 
 `PASS hBTC: victim calling one malicious contract loses 1.00000000 hBTC to attacker without allowance.`
 
-### Known-design / scope counterevidence
+### Normal-protocol-path counter-check
 
-A prior public Clarity Alliance USDh audit explicitly described the general `tx-sender` confused-deputy/phishing class and recommended replacing `tx-sender` with `contract-caller` **except within SIP-010 `transfer`**. Thus the exact transfer authorization pattern has substantial known-design risk rather than being a clean undisclosed access-control bug. In addition, the exploit requires the victim to invoke an attacker-controlled contract, which strongly overlaps with the bounty's phishing/social-engineering exclusion.
+A repository-wide call-path review did **not** find a normal hBTC user flow that injects an attacker-controlled callback without the user choosing the malicious contract:
 
-So #6 is now proven even on hBTC itself, but the new proof strengthens **impact and asset scope**, not the weak exploit precondition. Bounty acceptance remains unlikely unless a normal Hermetica workflow can be shown to route an unsuspecting user's transaction through an attacker-controlled nested contract without phishing/social engineering.
+- `vault-v1-2` uses fixed token/reserve contracts for deposit/redeem flows.
+- arbitrary assets/externals in `state-v1` are owner-controlled and timelocked.
+- `trading-v1` and integration interfaces are role-gated and validate registered externals.
+- some interface `let` expressions evaluate trait read calls before authorization, but state changes are rolled back on later auth failure and the observed pre-auth callbacks do not create a theft path.
+
+In addition, SIP-010 itself permits the `tx-sender` authorization pattern for `transfer`, with wallet post-conditions as an important safety boundary. A prior public Clarity Alliance audit also discussed the general `tx-sender` confused-deputy/phishing class and explicitly did not recommend removing `tx-sender` from SIP-010 transfer.
+
+Thus #6 demonstrates real nested-call transfer semantics and direct loss in a malicious-contract transaction, but it currently looks like a standard/phishing-adjacent Stacks interaction rather than a Hermetica-specific Critical exploit. Under the bounty's phishing/social-engineering exclusion it should not be submitted without a normal Hermetica call path that removes that user-interaction prerequisite.
 
 ## Finding #4 — negative PnL accounting
 
@@ -132,11 +173,11 @@ So #6 is now proven even on hBTC itself, but the new proof strengthens **impact 
 
 The current hBTC controller contains explicit negative-reward/loss handling and tests for reserve-fund coverage / total-assets reduction. No complete permissionless source -> missing accounting -> attacker profit or user loss chain was established for the separate USDh reward controller. It should not be represented as a validated High/Critical finding.
 
-## Final submission ranking after validation
+## Final submission ranking after adversarial validation
 
-1. **#6 — strongest raw proof on an hBTC asset:** direct 1 hBTC theft is executable, but malicious-contract victim interaction + prior audit treatment make acceptance unlikely under current rules.
-2. **#3 — strongest independent logic flaw:** exact profitable theft is executable in a near-empty pool, but current live supply makes the attack economically theoretical now.
-3. **#5 — strongest privilege-escalation chain:** executable USDh reserve drain, but current hBTC HQ uses safer `contract-caller`, and the attack requires a pending admin to invoke malicious code.
-4. **#4 — do not submit in its current form.**
+1. **#3 — only clearly distinct protocol logic primitive:** executable and apparently non-duplicate, but meaningful current-mainnet impact is not established because of the large live sUSDh supply. Historical empty-new-reserve exploitability was specifically disproven; the separate dual-version window belongs to known H-01.
+2. **#6 — strongest raw hBTC asset impact:** executable 1 hBTC nested-call theft, but the required malicious-contract interaction and SIP-010/audit precedent make a bounty rejection likely.
+3. **#5 — strong technical USDh reserve drain:** fully executable, but wrong current product/governance model and privileged/social prerequisite.
+4. **#4 — do not submit.**
 
-If optimizing strictly for expected bounty payout rather than technical correctness, none of #3/#5/#6 is a clean submission yet. The remaining work that could materially change that verdict is to find a normal, intended Hermetica call path that removes the malicious-user/admin-interaction prerequisite from #6/#5, or a currently reachable low-supply staking state for #3.
+If optimizing strictly for expected current Hermetica bounty payout, none of #3/#5/#6 is yet a clean High/Critical submission. #3 is the best candidate to continue researching because its root cause is distinct and permissionless; the missing element is a currently reachable way to make the global sUSDh ratio manipulation economically material without requiring impossible USDh amounts or a state already covered by audit H-01.
