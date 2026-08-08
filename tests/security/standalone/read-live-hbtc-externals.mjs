@@ -17,11 +17,26 @@ const known = {
   'hermetica-minting-auto-v1-2': 'SPN5AKG35QZSK2M8GAMR4AFX45659RJHDW353HSG.minting-auto-v1-2',
 };
 
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
 async function req(url, options = {}) {
-  const r = await fetch(url, { ...options, headers: { Accept: 'application/json', ...(options.body ? {'Content-Type':'application/json'} : {}) } });
-  const text = await r.text();
-  if (!r.ok) throw new Error(`${r.status} ${url}: ${text.slice(0,1200)}`);
-  return text ? JSON.parse(text) : null;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const r = await fetch(url, { ...options, headers: { Accept: 'application/json', ...(options.body ? {'Content-Type':'application/json'} : {}) } });
+    const text = await r.text();
+    if (r.ok) return text ? JSON.parse(text) : null;
+
+    if (r.status === 429 && attempt < 4) {
+      const retryHeader = Number(r.headers.get('retry-after') ?? 0);
+      const messageSeconds = Number(text.match(/try again in\s+(\d+)\s+seconds?/i)?.[1] ?? 0);
+      const waitSeconds = Math.max(retryHeader, messageSeconds, 2 ** attempt, 2);
+      console.log(`HIRO_RATE_LIMIT retry=${attempt + 1} wait=${waitSeconds}s url=${url}`);
+      await sleep(waitSeconds * 1000);
+      continue;
+    }
+
+    throw new Error(`${r.status} ${url}: ${text.slice(0,1200)}`);
+  }
+  throw new Error(`unreachable retry exhaustion: ${url}`);
 }
 function argHex(cv) { return '0x' + Cl.serialize(cv); }
 async function callRead(fn, args=[]) {
@@ -35,6 +50,7 @@ async function callRead(fn, args=[]) {
 const knownState = {};
 for (const [name,address] of Object.entries(known)) {
   knownState[name] = { address, result: await callRead('get-external',[Cl.principal(address)]) };
+  await sleep(150);
 }
 
 const sourceResp = await req(`${API}/v2/contracts/source/${ZEST}/v0-4-market`);
@@ -57,6 +73,7 @@ for (let offset=0; offset<500; offset+=50) {
     });
   }
   if ((j.results??[]).length < 50) break;
+  await sleep(250);
 }
 
 console.log('LIVE_HBTC_KNOWN_EXTERNALS='+JSON.stringify(knownState));
