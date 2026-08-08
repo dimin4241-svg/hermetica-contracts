@@ -127,6 +127,18 @@ jobs:
           path: tests/security/evidence/live-hbtc-all-roles.json
           if-no-files-found: error
 
+      - name: Scan retired hBTC vault claims for stranded express redemptions
+        if: always()
+        run: node tests/security/standalone/read-live-hbtc-retired-vault-claims.mjs
+
+      - name: Upload retired hBTC vault claim evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-hbtc-retired-vault-claims
+          path: tests/security/evidence/live-hbtc-retired-vault-claims.json
+          if-no-files-found: error
+
       - name: Scan live hBTC custom fee and cooldown overrides
         if: always()
         run: node tests/security/standalone/read-live-hbtc-custom-overrides.mjs
