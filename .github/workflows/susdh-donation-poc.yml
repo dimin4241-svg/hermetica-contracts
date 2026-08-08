@@ -29,6 +29,9 @@ jobs:
       - name: Run reconciled-NAV negative control
         run: node tests/security/stale-nav/run-reconciled-control.mjs
 
+      - name: Run Critical token-level direct payout A/B proof
+        run: node tests/security/stale-nav/run-critical-direct-payout-ab-poc.mjs
+
       - name: Run M-03 separation + mature-claim timing triager control
         run: node tests/security/stale-nav/run-triager-m03-separation-and-timing-poc.mjs
 
