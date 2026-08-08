@@ -23,5 +23,5 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Reconstruct exact migration activation order (read-only)
-        run: node tests/security/standalone/read-migration-order.mjs
+      - name: Inspect current sUSDh holder concentration (read-only)
+        run: node tests/security/standalone/read-susdh-holders.mjs
