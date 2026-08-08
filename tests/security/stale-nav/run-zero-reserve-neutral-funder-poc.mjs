@@ -7,10 +7,10 @@ const accounts = simnet.getAccounts();
 const deployer = accounts.get('deployer');
 const rewarder = accounts.get('wallet_1');
 const attacker = accounts.get('wallet_2');
-const legacy = accounts.get('wallet_3');
-const victim = accounts.get('wallet_4');
-const neutralFunder = accounts.get('wallet_5');
-if (!deployer || !rewarder || !attacker || !legacy || !victim || !neutralFunder) throw new Error('missing accounts');
+const victim = accounts.get('wallet_3');
+const legacy = deployer;
+const neutralFunder = victim;
+if (!deployer || !rewarder || !attacker || !victim) throw new Error('missing accounts');
 
 const BASE = 100_000_000n;
 const ATTACKER = 40_000_000n;
@@ -50,6 +50,7 @@ expect('confirm sBTC asset', pub('state', 'confirm-asset-request', [Cl.principal
 expect('deposit cap', pub('state', 'set-deposit-cap', [Cl.uint(2n * BASE)], deployer), '(ok true)');
 expect('default max-reward', ro('state', 'get-max-reward'), 'u5');
 expect('default max-deviation', ro('state', 'get-max-deviation'), 'u7');
+expect('victim is not manager', ro('hq-hbtc', 'get-manager', [Cl.principal(neutralFunder)]), 'false');
 
 for (const [who, amount] of [[attacker, ATTACKER], [legacy, LEGACY], [victim, VICTIM_DEPOSIT]]) {
   const r = simnet.callPrivateFn(SBTC, 'protocol-mint-many-iter', [Cl.tuple({ amount: Cl.uint(amount), recipient: Cl.principal(who) })], deployer);
@@ -64,9 +65,9 @@ simnet.mineEmptyBlocks(500);
 expect('deploy all 1.00 sBTC from Reserve', pub('strategy-loss-helper', 'pull-from-reserve', [Cl.uint(BASE)], deployer), '(ok true)');
 assert.equal(sbtc(reserve), 0n);
 
-console.log('=== no keeper can pre-fund the claim while Reserve is empty ===');
+console.log('=== no third party can pre-fund the claim while Reserve is empty ===');
 const preFund = pub('vault', 'fund-claim', [Cl.uint(1)], neutralFunder);
-console.log(`neutral keeper pre-fund with zero Reserve: ${text(preFund)}`);
+console.log(`non-manager third-party pre-fund with zero Reserve: ${text(preFund)}`);
 assert.match(text(preFund), /^\(err /, 'mature claim must remain unfunded because Reserve has no sBTC');
 const claimAfterFailedFund = text(ro('vault', 'get-claim', [Cl.uint(1)], attacker));
 assert.match(claimAfterFailedFund, /\(assets none\)/, 'failed pre-funding must leave the claim unfunded');
@@ -81,8 +82,8 @@ expect('victim deposits 0.40 at stale NAV', pub('vault', 'deposit', [Cl.uint(VIC
 assert.equal(sbtc(reserve), VICTIM_DEPOSIT);
 assert.equal(hbtc(victim), VICTIM_DEPOSIT);
 
-console.log('=== a neutral third party, not attacker, funds the mature claim ===');
-expect('neutral funder executes permissionless fund-claim', pub('vault', 'fund-claim', [Cl.uint(1)], neutralFunder), '(ok u40000000)');
+console.log('=== the non-manager victim itself can permissionlessly fund the mature claim ===');
+expect('victim executes permissionless fund-claim', pub('vault', 'fund-claim', [Cl.uint(1)], neutralFunder), '(ok u40000000)');
 assert.equal(sbtc(reserve), 0n);
 expect('attacker redeems already-funded claim', pub('vault', 'redeem', [Cl.uint(1)], attacker), '(ok u40000000)');
 
@@ -106,4 +107,4 @@ assert.equal(attackerFairLoss, 4_000n);
 assert.equal(legacyLoss, 6_000n, 'legacy holder bears only its original fair 60% share of the loss');
 assert.equal(victimLoss, 4_000n, 'later depositor alone absorbs the attacker\'s avoided 40% loss');
 
-console.log('PASS ZERO-RESERVE / NEUTRAL-FUNDER: before the adverse event no keeper can fund the mature claim because Reserve is empty. After a normal victim deposit supplies liquidity at stale NAV, an unrelated neutral caller can permissionlessly fund the attacker claim and transfer exactly the attacker\'s 4,000-sat fair loss onto the later depositor. No attacker-vs-keeper race is required.');
+console.log('PASS ZERO-RESERVE / NEUTRAL-FUNDER: before the adverse event nobody can fund the mature claim because Reserve is empty. After a normal victim deposit supplies liquidity at stale NAV, the non-manager victim itself can permissionlessly fund the attacker claim and transfer exactly the attacker\'s 4,000-sat fair loss onto itself. No attacker-vs-keeper race and no privileged funder are required.');
