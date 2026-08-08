@@ -19,6 +19,6 @@
 ;; actual final redemption in A/B controls instead of relying on mark-to-market.
 (define-public (return-to-reserve (amount uint))
   (as-contract? ((with-ft 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token "*" amount))
-    (try! (contract-call? sbtc-token transfer amount current-contract .reserve none))
+    (try! (contract-call? 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token transfer amount current-contract .reserve none))
   )
 )
