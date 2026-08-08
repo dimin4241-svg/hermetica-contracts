@@ -79,6 +79,14 @@ jobs:
         if: always()
         run: node tests/security/standalone/read-live-hbtc-positive-reward-history.mjs
 
+      - name: Upload production hBTC positive reward evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-hbtc-positive-reward-history
+          path: tests/security/evidence/live-hbtc-positive-reward-history.json
+          if-no-files-found: error
+
       - name: Prove deployed Zest v0-4 liquidation source semantics
         if: always()
         run: node tests/security/standalone/read-zest-v04-liquidation-source.mjs
