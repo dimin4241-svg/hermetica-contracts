@@ -29,6 +29,9 @@ jobs:
       - name: Run reconciled-NAV negative control
         run: node tests/security/stale-nav/run-reconciled-control.mjs
 
+      - name: Run minimal 1bp stale-NAV value-transfer PoC
+        run: node tests/security/stale-nav/run-1bp-minimal-loss-poc.mjs
+
       - name: Run stale-NAV live-limits blocking PoC
         run: node tests/security/stale-nav/run-live-limits-blocking-poc.mjs
 
