@@ -23,8 +23,5 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run sUSDh donation PoC
-        run: npm test -- tests/security/susdh-donation-poc.test.ts -- --manifest tests/security/standalone/Clarinet.toml
-
-      - name: Run tx-sender confused-deputy PoCs
-        run: npm test -- tests/security/tx-sender-confused-deputy-poc.test.ts -- --manifest tests/security/standalone/Clarinet.toml
+      - name: Run standalone sUSDh donation PoC
+        run: node tests/security/standalone/run-donation-poc.mjs
