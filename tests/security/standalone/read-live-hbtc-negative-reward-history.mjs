@@ -4,19 +4,25 @@ const CONTROLLER = `${HBTC}.controller-hbtc-v1`;
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-async function getJson(url, retries = 6) {
+function retryDelayMs(response, body, attempt) {
+  const header = Number(response.headers.get('retry-after'));
+  if (Number.isFinite(header) && header > 0) return (header + 2) * 1000;
+  const m = /try again in\s+(\d+)\s+seconds?/i.exec(body ?? '');
+  if (m) return (Number(m[1]) + 2) * 1000;
+  return Math.min(60000, 3000 * (attempt + 1));
+}
+
+async function getJson(url, retries = 8) {
   let last;
   for (let i = 0; i < retries; i++) {
-    try {
-      const r = await fetch(url, { headers: { Accept: 'application/json' } });
-      const text = await r.text();
-      if (r.ok) return text ? JSON.parse(text) : null;
-      last = new Error(`${r.status} ${url}: ${text.slice(0, 500)}`);
-      if (r.status !== 429 && r.status < 500) throw last;
-    } catch (e) {
-      last = e;
-    }
-    await sleep(1500 * (i + 1));
+    const r = await fetch(url, { headers: { Accept: 'application/json' } });
+    const text = await r.text();
+    if (r.ok) return text ? JSON.parse(text) : null;
+    last = new Error(`${r.status} ${url}: ${text.slice(0, 500)}`);
+    if (r.status !== 429 && r.status < 500) throw last;
+    const wait = retryDelayMs(r, text, i);
+    console.log(`HIRO_RATE_LIMIT retry=${i + 1} wait=${Math.ceil(wait / 1000)}s`);
+    await sleep(wait);
   }
   throw last;
 }
@@ -38,6 +44,7 @@ async function allAddressTxs(principal) {
     const rows = j?.results ?? [];
     out.push(...rows);
     if (rows.length < limit) break;
+    await sleep(1200);
   }
   return out;
 }
