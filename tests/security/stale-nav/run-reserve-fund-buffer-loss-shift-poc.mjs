@@ -78,8 +78,7 @@ expect('realize 30bps external loss', pub('strategy-loss-helper', 'realize-loss'
 assert.equal(sbtc(helper), STRATEGY_CAPITAL - GROSS_LOSS);
 expect('PR137 guard after realized loss', ro('pr137-shadow', 'is-sp-stale', [Cl.uint(freshLogTs)]), 'false');
 
-// Critical production behavior: controller checks gross reward/loss against max-reward BEFORE RF handling.
-// 30bps > live/default max-reward 5bps, so the RF cannot even be applied in this transaction.
+// Controller checks gross reward/loss against max-reward BEFORE RF handling.
 expect('full 30bps loss rejected before RF coverage', pub('controller-hbtc', 'log-reward', [Cl.uint(GROSS_LOSS), Cl.bool(false)], rewarder), '(err u102009)');
 assert.equal(sbtc(reserveFund), RF_BUFFER, 'failed reconciliation must roll back RF transfer');
 assert.equal(sbtc(reserve), BASE - STRATEGY_CAPITAL, 'reserve is unchanged by rejected reconciliation');
@@ -92,14 +91,26 @@ const attackerPayout = sbtc(attacker) - attackerLiquidBaseline;
 assert.equal(attackerPayout, ATTACKER_SHARES);
 assert.equal(sbtc(reserve), 10_000_000n, '0.10 sBTC reserve liquidity remains after stale exit');
 
-console.log('=== governance recovery: raise max-reward through the normal timelock, then recognize gross loss ===');
-// A 30bps gross loss cannot be submitted at max-reward=5. Model the normal governance recovery path.
-expect('request max-reward 30bps', pub('state', 'request-max-reward-update', [Cl.uint(30)], deployer), '(ok true)');
+console.log('=== governance recovery barrier #1: reduced total-assets makes the gross cap harder ===');
+// After the stale 0.40 exit, accounting total-assets is only 0.60 sBTC.
+// A 0.0030 sBTC gross loss is now 50bps of that accounting denominator, not 30bps.
+expect('request max-reward 50bps', pub('state', 'request-max-reward-update', [Cl.uint(50)], deployer), '(ok true)');
 simnet.mineEmptyBlocks(200);
-expect('confirm max-reward 30bps', pub('state', 'confirm-max-reward-request', [], deployer), '(ok true)');
-expect('max-reward now 30bps', ro('state', 'get-max-reward'), 'u30');
+expect('confirm max-reward 50bps', pub('state', 'confirm-max-reward-request', [], deployer), '(ok true)');
+expect('max-reward now 50bps', ro('state', 'get-max-reward'), 'u50');
 
-// Now controller can enter handle-loss-exceeds: 25bps comes from RF and only 5bps hits hBTC holders.
+console.log('=== governance recovery barrier #2: uncovered 5bps becomes >7bps price move for remaining supply ===');
+// With max-reward fixed, controller can reach RF handling. RF would cover 25bps of original NAV,
+// leaving only 50,000 sats uncovered. But after attacker burned 40% of supply, that 50,000-sat
+// loss moves the remaining 0.60 hBTC share price by ~8.33bps, above max-deviation=7bps.
+expect('max-reward-only recovery still blocked by max-deviation', pub('controller-hbtc', 'log-reward', [Cl.uint(GROSS_LOSS), Cl.bool(false)], rewarder), '(err u102010)');
+assert.equal(sbtc(reserveFund), RF_BUFFER, 'deviation failure rolls back attempted RF transfer');
+expect('request max-deviation 9bps', pub('state', 'request-max-deviation-update', [Cl.uint(9)], deployer), '(ok true)');
+simnet.mineEmptyBlocks(200);
+expect('confirm max-deviation 9bps', pub('state', 'confirm-max-deviation-request', [], deployer), '(ok true)');
+expect('max-deviation now 9bps', ro('state', 'get-max-deviation'), 'u9');
+
+console.log('=== only after both timelocked recovery changes can RF + loss accounting execute ===');
 expect('reconcile 30bps gross loss after governance recovery', pub('controller-hbtc', 'log-reward', [Cl.uint(GROSS_LOSS), Cl.bool(false)], rewarder), '(ok true)');
 assert.equal(sbtc(reserveFund), 0n, '25bps RF buffer is consumed');
 assert.equal(sbtc(reserve), 10_000_000n + RF_BUFFER, 'RF principal is transferred into reserve');
@@ -129,4 +140,4 @@ assert.equal(victimActualLoss, UNCOVERED_LOSS);
 assert.equal(victimIncrementalLoss, ATTACKER_FAIR_LOSS);
 assert.equal(attackerAvoidedLoss, victimIncrementalLoss);
 
-console.log('PASS RF-BUFFER LOSS SHIFT: with max-reward=5bps unchanged, a 30bps realized strategy loss is rejected before a 25bps Reserve Fund can be applied. The matured claimant exits at stale NAV from existing reserve. After normal timelocked recovery raises max-reward, RF absorbs 25bps and the remaining 5bps holder loss is recognized: the claimant avoided exactly 20,000 sats and the existing victim holder absorbed exactly 20,000 sats of incremental loss.');
+console.log('PASS RF-BUFFER LOSS SHIFT: a 25bps Reserve Fund does not prevent the stale-NAV loss shift. With max-reward=5bps, a 30bps gross strategy loss is rejected before RF can be applied. The matured claimant exits from existing reserve at stale NAV. The exit shrinks accounting total-assets/supply so recovery then requires timelocked max-reward=50bps and max-deviation>=9bps. Once RF finally covers 25bps, only 5bps remains as holder loss, yet the claimant avoided exactly 20,000 sats of that loss and the existing victim holder absorbed exactly 20,000 sats of incremental loss.');
