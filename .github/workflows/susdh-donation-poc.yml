@@ -23,5 +23,5 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Read deployed Zest v0-3 source (read-only)
-        run: node tests/security/standalone/read-zest-v03-source.mjs
+      - name: Read live hBTC / Zest risk state (read-only)
+        run: node tests/security/standalone/read-live-hbtc-risk.mjs
