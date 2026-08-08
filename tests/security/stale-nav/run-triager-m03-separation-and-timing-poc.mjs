@@ -6,8 +6,8 @@ const MANIFEST = 'tests/security/stale-nav/Clarinet.toml';
 const BASE = 100_000_000n;
 const ATTACKER_SHARES = 40_000_000n;
 const VICTIM_SHARES = 60_000_000n;
-const LOSS = 10_000n; // 1 bp of 1.00 sBTC
-const FAIR_ATTACKER_AFTER_LOSS = 39_996_000n;
+const LOSS = 12_000n; // 1.2 bps of 1.00 sBTC; still below 5/7 bps production guards
+const FAIR_ATTACKER_AFTER_LOSS = 39_995_200n;
 const SBTC = 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token';
 
 const text = r => cvToString(r.result);
@@ -72,27 +72,24 @@ async function setup({ strategyCapital = BASE } = {}) {
 
 console.log('\n=== TRIAGER CONTROL A: exact old M-03 request-time lock-in is fixed ===');
 {
-  // Keep 0.50 sBTC in Reserve so the control proves a successful corrected payout,
-  // rather than stopping at a correct process-claim calculation with insufficient liquidity.
   const x = await setup({ strategyCapital: 50_000_000n });
   x.expect('fresh NAV log', x.pub('controller-hbtc', 'log-reward', [Cl.uint(0), Cl.bool(true)], x.rewarder), '(ok true)');
-  x.expect('external loss becomes real BEFORE request', x.pub('strategy-loss-helper', 'realize-loss', [Cl.uint(LOSS), Cl.principal(x.deployer)], x.deployer), '(ok true)');
+  x.expect('external 1.2bp loss becomes real BEFORE request', x.pub('strategy-loss-helper', 'realize-loss', [Cl.uint(LOSS), Cl.principal(x.deployer)], x.deployer), '(ok true)');
   assert.equal(x.price(), BASE, 'accounting price is stale when request is created');
 
   x.expect('request redeem while NAV is stale', x.pub('vault', 'request-redeem', [Cl.uint(ATTACKER_SHARES), Cl.bool(false)], x.attacker), '(ok u1)');
-  const requested = x.ro('vault', 'get-claim', [Cl.uint(1)], x.attacker);
-  const requestedText = text(requested);
+  const requestedText = text(x.ro('vault', 'get-claim', [Cl.uint(1)], x.attacker));
   console.log(`claim immediately after request: ${requestedText}`);
   assert.match(requestedText, /\(assets none\)/, 'current remediation must not lock an asset amount at request time');
   assert.match(requestedText, /\(share-price none\)/, 'current remediation must not lock share price at request time');
 
   x.simnet.mineEmptyBlocks(500);
-  x.expect('reconcile the 1bp loss before funding', x.pub('controller-hbtc', 'log-reward', [Cl.uint(LOSS), Cl.bool(false)], x.rewarder), '(ok true)');
-  assert.equal(x.price(), 99_990_000n);
+  x.expect('reconcile the 1.2bp loss before funding', x.pub('controller-hbtc', 'log-reward', [Cl.uint(LOSS), Cl.bool(false)], x.rewarder), '(ok true)');
+  assert.equal(x.price(), 99_988_000n);
 
-  x.expect('fund old-M03-style claim at corrected price', x.pub('vault', 'fund-claim', [Cl.uint(1)], x.attacker), '(ok u39996000)');
-  x.expect('redeem old-M03-style claim at corrected value', x.pub('vault', 'redeem', [Cl.uint(1)], x.attacker), '(ok u39996000)');
-  console.log('PASS OLD-M03 NEGATIVE CONTROL: a claim requested while NAV is stale does NOT lock stale assets; once NAV is corrected before funding, current code pays exactly the corrected 39,996,000 sats.');
+  x.expect('fund old-M03-style claim at corrected price', x.pub('vault', 'fund-claim', [Cl.uint(1)], x.attacker), '(ok u39995200)');
+  x.expect('redeem old-M03-style claim at corrected value', x.pub('vault', 'redeem', [Cl.uint(1)], x.attacker), '(ok u39995200)');
+  console.log('PASS OLD-M03 NEGATIVE CONTROL: request-time staleness does not lock assets or price; once NAV is corrected before funding, current code pays exactly 39,995,200 sats.');
 }
 
 console.log('\n=== TRIAGER CONTROL B: mature standard claim is a cancellable pre-positioned option ===');
@@ -112,7 +109,7 @@ console.log('\n=== TRIAGER CONTROL B: mature standard claim is a cancellable pre
   const freshTs = u(x.ro('state', 'get-last-log-ts'));
   x.expect('PR137 timestamp guard says fresh', x.ro('pr137-shadow', 'is-sp-stale', [Cl.uint(freshTs)]), 'false');
 
-  x.expect('new 1bp external loss occurs AFTER fresh log', x.pub('strategy-loss-helper', 'realize-loss', [Cl.uint(LOSS), Cl.principal(x.deployer)], x.deployer), '(ok true)');
+  x.expect('new 1.2bp external loss occurs AFTER fresh log', x.pub('strategy-loss-helper', 'realize-loss', [Cl.uint(LOSS), Cl.principal(x.deployer)], x.deployer), '(ok true)');
   x.expect('PR137 still says fresh after adverse event', x.ro('pr137-shadow', 'is-sp-stale', [Cl.uint(freshTs)]), 'false');
   x.expect('immediate correction blocked only by update-window', x.pub('controller-hbtc', 'log-reward', [Cl.uint(LOSS), Cl.bool(false)], x.rewarder), '(err u102011)');
   assert.equal(x.price(), BASE);
@@ -124,14 +121,13 @@ console.log('\n=== TRIAGER CONTROL B: mature standard claim is a cancellable pre
   assert.equal(stalePayout, ATTACKER_SHARES);
 
   x.simnet.mineEmptyBlocks(200);
-  x.expect('later reconcile same 1bp loss', x.pub('controller-hbtc', 'log-reward', [Cl.uint(LOSS), Cl.bool(false)], x.rewarder), '(ok true)');
+  x.expect('later reconcile same 1.2bp loss', x.pub('controller-hbtc', 'log-reward', [Cl.uint(LOSS), Cl.bool(false)], x.rewarder), '(ok true)');
 
   const victimValue = x.assetsForShares(VICTIM_SHARES, x.victim);
   const attackerExcess = stalePayout - FAIR_ATTACKER_AFTER_LOSS;
-  const victimFairLoss = 6_000n;
+  const victimFairLoss = 7_200n;
   const victimActualLoss = VICTIM_SHARES - victimValue;
   const victimIncrementalLoss = victimActualLoss - victimFairLoss;
-  const integerRoundingDust = victimIncrementalLoss - attackerExcess;
 
   console.log(`attacker stale payout raw:       ${stalePayout}`);
   console.log(`attacker fair payout raw:        ${FAIR_ATTACKER_AFTER_LOSS}`);
@@ -139,12 +135,11 @@ console.log('\n=== TRIAGER CONTROL B: mature standard claim is a cancellable pre
   console.log(`victim fair loss raw:            ${victimFairLoss}`);
   console.log(`victim actual loss raw:          ${victimActualLoss}`);
   console.log(`victim incremental loss raw:     ${victimIncrementalLoss}`);
-  console.log(`integer rounding dust raw:       ${integerRoundingDust}`);
 
-  assert.equal(attackerExcess, 4_000n);
-  assert.ok(victimActualLoss >= 10_000n && victimActualLoss <= 10_001n, 'victim loss differs only by at most one sat of integer conversion rounding');
-  assert.ok(victimIncrementalLoss >= attackerExcess && victimIncrementalLoss <= attackerExcess + 1n, 'economic loss shift equals attacker avoided loss, plus at most one sat of unrelated rounding dust');
-  assert.ok(integerRoundingDust >= 0n && integerRoundingDust <= 1n, 'rounding contribution must remain at most one sat');
+  assert.equal(attackerExcess, 4_800n);
+  assert.equal(victimActualLoss, 12_000n);
+  assert.equal(victimIncrementalLoss, 4_800n);
+  assert.equal(attackerExcess, victimIncrementalLoss);
 
-  console.log('PASS NEW-BUG POSITIVE CONTROL: the old request-time M-03 is fixed and the same standard claim is cancellable before funding, yet a NEW loss occurring after a fresh log makes the funding-time price stale; the mature claimant avoids exactly 4,000 sats of loss and shifts the same economic loss onto the existing holder, with at most one additional sat from ordinary integer conversion rounding.');
+  console.log('PASS NEW-BUG POSITIVE CONTROL: old M-03 request-time locking is demonstrably fixed and the mature claim is cancellable/re-armable, yet a NEW post-log loss creates stale funding-time NAV. The claimant avoids exactly 4,800 sats of loss and the existing holder absorbs exactly the same 4,800 sats, with zero rounding discrepancy.');
 }
