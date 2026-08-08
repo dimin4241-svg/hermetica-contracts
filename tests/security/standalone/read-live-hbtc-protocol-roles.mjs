@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { Cl, deserializeCV, cvToString } from '@stacks/transactions';
 
 const API = 'https://api.hiro.so';
@@ -121,11 +122,17 @@ for (const principal of activeNow) {
   await sleep(150);
 }
 
-console.log('LIVE_HBTC_PROTOCOL_ROLE_OPS=' + JSON.stringify(ops));
-console.log('LIVE_HBTC_PROTOCOL_ROLE_RECONSTRUCTED=' + JSON.stringify({
+const evidence = {
+  observed_at: new Date().toISOString(),
+  hq: HQ,
   active_from_event_replay: [...active.entries()].filter(([, enabled]) => enabled).map(([address]) => address),
   pending: [...pending.entries()],
   live_get_protocol: live,
   active_now: activeNow,
   source_summaries: sourceSummaries,
-}));
+  role_ops: ops,
+};
+
+fs.mkdirSync('tests/security/evidence', { recursive: true });
+fs.writeFileSync('tests/security/evidence/live-hbtc-protocol-roles.json', JSON.stringify(evidence, null, 2));
+console.log('LIVE_HBTC_PROTOCOL_ROLE_RECONSTRUCTED=' + JSON.stringify(evidence));
