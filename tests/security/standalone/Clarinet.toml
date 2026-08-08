@@ -1,6 +1,6 @@
 [project]
 name = 'hermetica-security-pocs'
-description = 'Local-only security validation using production USDh contracts'
+description = 'Local-only security validation using production Hermetica contracts'
 authors = []
 telemetry = false
 cache_dir = '.cache-security'
@@ -84,3 +84,20 @@ epoch = 3.2
 path = '../../../mainnet/contracts/usdh/protocol/redeeming-reserve-v1-2.clar'
 clarity_version = 2
 epoch = 3.2
+
+# hBTC production contracts needed to validate the same tx-sender transfer
+# behavior directly against the bounty's in-scope token.
+[contracts.hq-hbtc]
+path = '../../../mainnet/contracts/hbtc/protocol/hq-v1.clar'
+clarity_version = 4
+epoch = 3.3
+
+[contracts.blacklist]
+path = '../../../mainnet/contracts/hbtc/protocol/blacklist-v1.clar'
+clarity_version = 4
+epoch = 3.3
+
+[contracts.token-hbtc]
+path = '../../../mainnet/contracts/hbtc/tokens/token-hbtc.clar'
+clarity_version = 4
+epoch = 3.3
