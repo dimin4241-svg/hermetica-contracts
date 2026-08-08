@@ -56,6 +56,9 @@ jobs:
       - name: Read live hBTC permanent burn dust
         run: node tests/security/standalone/read-live-hbtc-burn-dust.mjs
 
+      - name: Verify live hBTC standard exit fee
+        run: node tests/security/standalone/read-live-hbtc-fees.mjs
+
       - name: Read live hBTC accounting and reachability controls
         run: node tests/security/standalone/read-live-hbtc-controls.mjs
 
