@@ -29,5 +29,8 @@ jobs:
       - name: Run standalone tx-sender confused-deputy PoCs
         run: node tests/security/standalone/run-confused-deputy-pocs.mjs
 
+      - name: Run in-scope hBTC token theft PoC
+        run: node tests/security/standalone/run-hbtc-token-theft-poc.mjs
+
       - name: Read live staking state (read-only)
         run: node tests/security/standalone/read-live-staking-state.mjs
