@@ -23,5 +23,5 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Reconstruct historical hBTC / Zest position (read-only)
-        run: node tests/security/standalone/read-hbtc-zest-history.mjs
+      - name: Run stale-NAV external-loss value-transfer PoC
+        run: node tests/security/stale-nav/run-stale-nav-poc.mjs
