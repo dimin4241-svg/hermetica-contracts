@@ -78,3 +78,11 @@ jobs:
       - name: Reconstruct live hBTC protocol roles
         if: always()
         run: node tests/security/standalone/read-live-hbtc-protocol-roles.mjs
+
+      - name: Upload live hBTC protocol role evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-hbtc-protocol-roles
+          path: tests/security/evidence/live-hbtc-protocol-roles.json
+          if-no-files-found: error
