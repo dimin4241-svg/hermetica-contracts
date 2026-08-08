@@ -23,5 +23,5 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Read live hBTC / Zest risk state (read-only)
-        run: node tests/security/standalone/read-live-hbtc-risk.mjs
+      - name: Reconstruct historical hBTC / Zest position (read-only)
+        run: node tests/security/standalone/read-hbtc-zest-history.mjs
