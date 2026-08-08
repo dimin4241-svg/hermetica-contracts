@@ -1,0 +1,39 @@
+name: USDh Low-Duplicate Recon
+
+on:
+  push:
+    branches:
+      - validation-susdh-donation-poc
+    paths:
+      - 'tests/security/usdh/**'
+      - 'tests/security/standalone/read-live-usdh-jit-reward-surface.mjs'
+      - '.github/workflows/usdh-low-duplicate-recon.yml'
+  workflow_dispatch:
+
+jobs:
+  recon:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+
+      - name: Scan live USDh discrete reward surface
+        run: node tests/security/standalone/read-live-usdh-jit-reward-surface.mjs
+
+      - name: Run JIT staking reward A/B PoC if present
+        if: ${{ hashFiles('tests/security/usdh/run-jit-reward-ab-poc.mjs') != '' }}
+        run: node tests/security/usdh/run-jit-reward-ab-poc.mjs
+
+      - name: Upload USDh evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: usdh-low-duplicate-recon
+          path: |
+            tests/security/evidence/live-usdh-jit-reward-surface.json
+          if-no-files-found: warn
