@@ -29,6 +29,9 @@ jobs:
       - name: Scan live minting-auto supported assets and feed IDs
         run: node tests/security/usdh/read-live-minting-auto-assets.mjs
 
+      - name: Scan live USDh cross-version roles
+        run: node tests/security/usdh/read-live-usdh-role-versions.mjs
+
       - name: Run JIT staking reward A/B PoC
         continue-on-error: true
         run: node tests/security/usdh/run-jit-reward-ab-ci.mjs
@@ -41,4 +44,5 @@ jobs:
           path: |
             tests/security/evidence/live-usdh-jit-reward-surface.json
             tests/security/evidence/live-usdh-minting-auto-assets.json
+            tests/security/evidence/live-usdh-role-versions.json
           if-no-files-found: warn
