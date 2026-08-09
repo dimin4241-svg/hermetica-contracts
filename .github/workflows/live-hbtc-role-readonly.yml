@@ -1,4 +1,4 @@
-name: Live USDh staking-silo migration probe
+name: Live hBTC minting-auto economic invariant probe
 
 on:
   push:
@@ -23,35 +23,97 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
-      - name: Read old/new silo counters and boundary claims
+      - name: Read live configuration and brute-force same-price round trips
         shell: bash
         run: |
           set -euo pipefail
           node --input-type=module <<'NODE'
           import { Cl, serializeCV, deserializeCV, cvToJSON } from '@stacks/transactions';
-          const A='SPN5AKG35QZSK2M8GAMR4AFX45659RJHDW353HSG';
+
+          const HBTC='SP1S1HSFH0SQQGWKB69EYFNY0B1MHRMGXR3J1FH4D';
+          const USDH='SPN5AKG35QZSK2M8GAMR4AFX45659RJHDW353HSG';
+          const SBTC='SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token';
+          const HIF=`${HBTC}.hermetica-interface-hbtc-v1`;
           const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+
           function hex(cv){const x=serializeCV(cv); return typeof x==='string'?(x.startsWith('0x')?x:'0x'+x):'0x'+Buffer.from(x).toString('hex');}
-          async function read(name,fn,args=[]){
-            const url=`https://api.hiro.so/v2/contracts/call-read/${A}/${name}/${fn}`;
-            const body=JSON.stringify({sender:A,arguments:args.map(hex)});
+          async function read(addr,name,fn,args=[]){
+            const url=`https://api.hiro.so/v2/contracts/call-read/${addr}/${name}/${fn}`;
+            const body=JSON.stringify({sender:addr,arguments:args.map(hex)});
             for(let i=0;i<8;i++){
               const r=await fetch(url,{method:'POST',headers:{'content-type':'application/json'},body});
-              if(r.status===429){await sleep(2500+i*1500);continue;}
+              if(r.status===429){await sleep(2000+i*1500);continue;}
               if(!r.ok) throw new Error(`${name}.${fn}: ${r.status} ${await r.text()}`);
-              const j=await r.json(); return {raw:j.result,decoded:j.result?cvToJSON(deserializeCV(j.result)):j};
+              const j=await r.json();
+              if(!j.result) throw new Error(JSON.stringify(j));
+              return cvToJSON(deserializeCV(j.result));
             }
             throw new Error('rate limit');
           }
-          for(const name of ['staking-silo-v1','staking-silo-v1-1']){
-            const x=await read(name,'get-current-claim-id');
-            console.log(`${name}.current=${JSON.stringify(x.decoded)}`);
+          const u = j => BigInt(j.success===true ? j.value.value : j.value);
+
+          const mintFeeJ=await read(USDH,'minting-auto-state-v1','get-mint-fee');
+          const redeemFeeJ=await read(USDH,'minting-auto-state-v1','get-redeem-fee');
+          const minJ=await read(USDH,'minting-state-v1','get-min-amount-usdh-requested');
+          const wlJ=await read(USDH,'minting-auto-state-v1','get-whitelist',[Cl.principal(HIF),Cl.principal(SBTC)]);
+          const supportedJ=await read(USDH,'minting-auto-state-v1','get-supported-asset',[Cl.principal(SBTC)]);
+          const hAssetJ=await read(HBTC,'state-hbtc-v1','get-asset',[Cl.principal(SBTC)]);
+
+          console.log('mint_fee=' + JSON.stringify(mintFeeJ));
+          console.log('redeem_fee=' + JSON.stringify(redeemFeeJ));
+          console.log('min_usdh=' + JSON.stringify(minJ));
+          console.log('whitelist=' + JSON.stringify(wlJ));
+          console.log('supported_sbtc=' + JSON.stringify(supportedJ));
+          console.log('hbtc_asset=' + JSON.stringify(hAssetJ));
+
+          const mintFee=u(mintFeeJ);
+          const redeemFee=u(redeemFeeJ);
+          const minUsdh=u(minJ);
+          const wl=wlJ.value;
+          const slip=BigInt(wl.value['price-slippage'].value);
+          const tokenBase=100_000_000n;
+          const usdhBase=100_000_000n;
+          const priceBase=100_000_000n;
+          const bps=10_000n;
+
+          console.log(`CONFIG|minUsdh=${minUsdh}|slipBps=${slip}|mintFee=${mintFee}|redeemFee=${redeemFee}`);
+
+          function mintRequired(amountUsdh, price){
+            const slippageInPrice=(price*slip)/bps;
+            const denom=price-slippageInPrice;
+            const required=(amountUsdh*priceBase*tokenBase)/denom/usdhBase;
+            const before=(amountUsdh*priceBase*tokenBase)/price/usdhBase;
+            const assetSlip=required-before;
+            const fee=(assetSlip*mintFee)/bps;
+            // Caller must have at least required; required is split custody + fee.
+            return {required,before,fee};
           }
-          for(const id of [1233,1234,1235,1236]){
-            for(const name of ['staking-silo-v1','staking-silo-v1-1']){
-              const x=await read(name,'get-claim',[Cl.uint(id)]);
-              console.log(`${name}.claim.${id}=${JSON.stringify(x.decoded)}`);
-              await sleep(300);
+          function redeemOut(amountUsdh, price){
+            const slippageInPrice=(price*slip)/bps;
+            const denom=price+slippageInPrice;
+            const required=(amountUsdh*priceBase*tokenBase)/denom/usdhBase;
+            const before=(amountUsdh*priceBase*tokenBase)/price/usdhBase;
+            const assetSlip=before-required;
+            const fee=(assetSlip*redeemFee)/bps;
+            return {out:required-fee,required,before,fee};
+          }
+
+          let best=null;
+          // Prices are Pyth integer prices with expo=-8. Sweep BTC $1k-$500k.
+          for(let usd=1000; usd<=500000; usd+=1000){
+            const price=BigInt(usd)*priceBase;
+            for(const mult of [1n,2n,3n,10n,100n,1000n]){
+              const amount=minUsdh*mult;
+              const m=mintRequired(amount,price);
+              const r=redeemOut(amount,price);
+              const delta=r.out-m.required;
+              if(best===null || delta>best.delta) best={usd,amount,delta,...m,...r};
+              if(delta>0n){
+                console.log('POSITIVE_ROUNDTRIP=' + JSON.stringify({usd,amount:amount.toString(),delta:delta.toString()}));
+                process.exit(2);
+              }
             }
           }
+          console.log('BEST_SAME_PRICE_ROUNDTRIP=' + JSON.stringify(Object.fromEntries(Object.entries(best).map(([k,v])=>[k,typeof v==='bigint'?v.toString():v]))));
+          console.log(best.delta>0n?'ROUNDTRIP_INVARIANT=VIOLATED':'ROUNDTRIP_INVARIANT=NO_POSITIVE_DELTA');
           NODE
