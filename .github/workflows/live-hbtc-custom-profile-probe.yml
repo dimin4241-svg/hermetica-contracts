@@ -1,0 +1,55 @@
+name: Live hBTC custom profile probe
+
+on:
+  push:
+    branches:
+      - evidence/live-hbtc-role-readonly
+    paths:
+      - .github/workflows/live-hbtc-custom-profile-probe.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Scan State custom cooldown / exit-fee events
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          const O='SP1S1HSFH0SQQGWKB69EYFNY0B1MHRMGXR3J1FH4D';
+          const STATE=`${O}.state-hbtc-v1`;
+          const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+          async function req(url){
+            for(let i=0;i<10;i++){
+              const r=await fetch(url,{headers:{accept:'application/json'}});
+              if(r.status===429){await sleep(1200+i*800);continue;}
+              if(!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+              return await r.json();
+            }
+            throw new Error('rate limit '+url);
+          }
+          const latest=new Map();
+          for(let offset=0;offset<2000;offset+=50){
+            const p=await req(`https://api.hiro.so/extended/v1/contract/${STATE}/events?limit=50&offset=${offset}`);
+            const rows=p.results??[];
+            for(const e of rows){
+              const repr=e?.contract_log?.value?.repr??'';
+              if(!(repr.includes('set-custom-cooldown')||repr.includes('remove-custom-cooldown')||repr.includes('set-custom-exit-fee')||repr.includes('remove-custom-exit-fee'))) continue;
+              const addr=repr.match(/\(address '([^\)]+)\)/)?.[1];
+              const action=repr.match(/\(action "([^"]+)"\)/)?.[1];
+              if(!addr||!action) continue;
+              const kind=action.includes('cooldown')?'cooldown':'exit-fee';
+              const key=`${kind}:${addr}`;
+              if(!latest.has(key)) latest.set(key,{action,addr,repr,tx_id:e.tx_id});
+            }
+            if(rows.length<50) break;
+            await sleep(250);
+          }
+          for(const [key,v] of latest) console.log('LATEST='+JSON.stringify({key,...v}));
+          NODE
