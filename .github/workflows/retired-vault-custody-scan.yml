@@ -1,0 +1,35 @@
+name: Retired hBTC Custody Scan
+
+on:
+  push:
+    branches:
+      - validation-susdh-donation-poc
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout validation branch
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Scan retired hBTC vault custody balances
+        run: node tests/security/standalone/read-live-hbtc-retired-vault-balances.mjs
+
+      - name: Upload retired hBTC custody evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-hbtc-retired-vault-balances
+          path: tests/security/evidence/live-hbtc-retired-vault-balances.json
+          if-no-files-found: error
