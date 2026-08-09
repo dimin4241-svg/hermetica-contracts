@@ -12,14 +12,20 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 6
     steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
       - name: Read roles and contract existence
         shell: bash
         run: |
           node --input-type=module <<'NODE'
+          import { Cl, serializeCV } from '@stacks/transactions';
           const O='SP1S1HSFH0SQQGWKB69EYFNY0B1MHRMGXR3J1FH4D';
-          const HQ=`${O}.hq-v1`;
           const names=['vault-hbtc-v1','vault-hbtc-v1-1','vault-hbtc-v1-2','granite-interface-hbtc-v1','state-hbtc-v1','trading-hbtc-v1'];
           const sleep=ms=>new Promise(r=>setTimeout(r,ms));
           async function req(url,opts={}){
@@ -30,23 +36,15 @@ jobs:
             }
             throw new Error('rate limit '+url);
           }
-          function principalCV(p){
-            // Standard/contract principal serialization is easier through the API's
-            // accepted hex Clarity argument generated below with @stacks/transactions.
-            return p;
-          }
-          const { Cl, serializeCV } = await import('@stacks/transactions');
           for(const name of names){
             const principal=`${O}.${name}`;
             const src=await req(`https://api.hiro.so/v2/contracts/source/${O}/${name}?proof=0`);
             console.log(`CONTRACT_${name}=${src.status}`);
             if(!src.ok) continue;
-            const dot=HQ.indexOf('.');
             const arg='0x'+Buffer.from(serializeCV(Cl.principal(principal))).toString('hex');
-            const rr=await req(`https://api.hiro.so/v2/contracts/call-read/${HQ.slice(0,dot)}/${HQ.slice(dot+1)}/get-protocol`,{
+            const rr=await req(`https://api.hiro.so/v2/contracts/call-read/${O}/hq-v1/get-protocol`,{
               method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({sender:O,arguments:[arg]})
             });
-            const j=await rr.json();
-            console.log(`PROTOCOL_${name}=${JSON.stringify(j)}`);
+            console.log(`PROTOCOL_${name}=${JSON.stringify(await rr.json())}`);
           }
           NODE
