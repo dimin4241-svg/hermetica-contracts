@@ -1,4 +1,4 @@
-name: Live hBTC vault-version role probe
+name: Live hBTC capability graph
 
 on:
   push:
@@ -14,38 +14,46 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 6
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - name: Read roles and contract existence
+      - name: Reconstruct current role set from HQ events
         shell: bash
         run: |
           node --input-type=module <<'NODE'
-          import { Cl, serializeCV } from '@stacks/transactions';
           const O='SP1S1HSFH0SQQGWKB69EYFNY0B1MHRMGXR3J1FH4D';
-          const names=['vault-hbtc-v1','vault-hbtc-v1-1','vault-hbtc-v1-2','granite-interface-hbtc-v1','state-hbtc-v1','trading-hbtc-v1'];
+          const HQ=`${O}.hq-v1`;
+          const roleNames={'0x01':'GUARDIAN','0x02':'TRADER','0x03':'REWARDER','0x04':'MANAGER','0x05':'FEE_SETTER','0x06':'PROTOCOL'};
+          const state=new Map();
           const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-          async function req(url,opts={}){
-            for(let i=0;i<8;i++){
-              const r=await fetch(url,opts);
-              if(r.status===429){await sleep(1000+i*700);continue;}
-              return r;
+          async function get(url){
+            for(let i=0;i<10;i++){
+              const r=await fetch(url,{headers:{accept:'application/json'}});
+              if(r.status===429){await sleep(1200+i*700);continue;}
+              if(!r.ok) throw new Error(`${r.status} ${url} ${await r.text()}`);
+              return r.json();
             }
-            throw new Error('rate limit '+url);
+            throw new Error('rate-limit');
           }
-          for(const name of names){
-            const principal=`${O}.${name}`;
-            const src=await req(`https://api.hiro.so/v2/contracts/source/${O}/${name}?proof=0`);
-            console.log(`CONTRACT_${name}=${src.status}`);
-            if(!src.ok) continue;
-            const arg='0x'+serializeCV(Cl.principal(principal));
-            const rr=await req(`https://api.hiro.so/v2/contracts/call-read/${O}/hq-v1/get-protocol`,{
-              method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({sender:O,arguments:[arg]})
-            });
-            const text=await rr.text();
-            console.log(`PROTOCOL_${name}=HTTP${rr.status}:${text}`);
+          let count=0;
+          for(let offset=0;offset<600;offset+=50){
+            const p=await get(`https://api.hiro.so/extended/v1/contract/${HQ}/events?limit=50&offset=${offset}`);
+            const rows=p.results??[];
+            for(const e of rows){
+              const repr=e?.contract_log?.value?.repr??'';
+              if(!repr.includes('(action "confirm-update")')) continue;
+              const m=repr.match(/\(address '([^\)]+)\).*\(is-add (true|false)\).*\(type (0x[0-9a-fA-F]+)\)/);
+              if(!m) continue;
+              const [,address,add,type]=m;
+              const role=roleNames[type]??type;
+              state.set(`${type}|${address}`,add==='true');
+              console.log('ROLE_EVENT='+JSON.stringify({role,type,address,is_add:add==='true',tx_id:e.tx_id,event_index:e.event_index,repr}));
+              count++;
+            }
+            if(rows.length<50) break;
+            await sleep(120);
+          }
+          console.log(`ROLE_EVENTS=${count}`);
+          for(const [key,active] of state){
+            if(!active) continue;
+            const [type,address]=key.split('|');
+            console.log('ACTIVE_ROLE='+JSON.stringify({role:roleNames[type]??type,type,address}));
           }
           NODE
