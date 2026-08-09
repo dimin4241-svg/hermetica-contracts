@@ -12,9 +12,6 @@ const attacker = accounts.get('wallet_3');
 if (!deployer || !victim || !attacker) throw new Error('missing accounts');
 
 const BASE = 100_000_000n;
-const SBTC = 'SM3VDXK3WZZSA84XXF1T3KY37XEZTPGGDC8EQYP';
-// Actual token contract used by the production-security deployment.
-const SBTC_TOKEN = 'SM3VDXK3WZZSA84XXF1T3KY37XEZTPGGDC8EQYP.sbtc-token';
 const PROD_SBTC_TOKEN = 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token';
 const c = n => `${deployer}.${n}`;
 const text = r => cvToString(r.result);
@@ -69,7 +66,7 @@ assert.equal(hbtc(victim), 0n, 'victim shares must be escrowed in vault');
 simnet.mineEmptyBlocks(500);
 
 console.log('=== CONTROL: pause alone still lets victim recover hBTC through cancel-redeem ===');
-expectResult('owner pauses redemption', pub('state', 'set-redeem-enabled', [Cl.bool(false)], deployer), '(ok false)');
+expectResult('owner pauses redemption', pub('state', 'set-redeem-enabled', [Cl.bool(false)], deployer), '(ok true)');
 expectResult('redeem-enabled is false', ro('state', 'get-redeem-enabled'), 'false');
 expectResult('victim cancel claim #1 while paused', pub('vault', 'cancel-redeem', [Cl.uint(1)], victim), '(ok u100000000)');
 assert.equal(hbtc(victim), BASE, 'pause alone must leave the unfunded standard claim recoverable');
@@ -80,7 +77,7 @@ expectResult('owner re-enables redemption to create equivalent claim', pub('stat
 expectResult('victim request standard redeem #2', pub('vault', 'request-redeem', [Cl.uint(BASE), Cl.bool(false)], victim), '(ok u2)');
 assert.equal(hbtc(victim), 0n);
 simnet.mineEmptyBlocks(500);
-expectResult('owner pauses redemption again', pub('state', 'set-redeem-enabled', [Cl.bool(false)], deployer), '(ok false)');
+expectResult('owner pauses redemption again', pub('state', 'set-redeem-enabled', [Cl.bool(false)], deployer), '(ok true)');
 
 console.log('=== ATTACK: unrelated non-manager force-funds during the pause ===');
 expectResult('unrelated attacker funds claim #2 while redeem-disabled', pub('vault', 'fund-claim', [Cl.uint(2)], attacker), '(ok u100000000)');
