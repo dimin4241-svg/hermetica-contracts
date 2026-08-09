@@ -1,0 +1,27 @@
+name: Paused Force-Funding PoC
+
+on:
+  push:
+    branches:
+      - validation-susdh-donation-poc
+  workflow_dispatch:
+
+jobs:
+  poc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout validation branch
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run paused permissionless force-funding A/B proof
+        run: npx vitest run tests/security/pause-force-fund/paused-force-funding-freeze.test.ts --reporter=verbose
