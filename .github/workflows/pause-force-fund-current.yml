@@ -1,0 +1,28 @@
+name: Exact-current hBTC pause force-funding PoC
+
+on:
+  push:
+    branches: [evidence/live-hbtc-role-readonly]
+    paths:
+      - .github/workflows/pause-force-fund-current.yml
+      - tests/security/pause-force-fund/**
+      - mainnet/contracts/hbtc/protocol/vault-v1-2.clar
+      - mainnet/contracts/hbtc/protocol/state-v1.clar
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  poc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Run exact-current A/B PoC
+        run: node tests/security/pause-force-fund/run-current-poc.mjs
