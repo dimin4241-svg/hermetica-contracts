@@ -1,0 +1,35 @@
+name: Live hBTC Semantic Drift
+
+on:
+  push:
+    branches:
+      - validation-susdh-donation-poc
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout validation branch
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Compare live hBTC source semantics with repository
+        run: node tests/security/standalone/read-live-hbtc-semantic-drift.mjs
+
+      - name: Upload semantic drift evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-hbtc-semantic-drift
+          path: tests/security/evidence/live-hbtc-semantic-drift.json
+          if-no-files-found: error
