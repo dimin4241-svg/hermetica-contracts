@@ -1,4 +1,4 @@
-name: Live USDh whitelisted contract source probe
+name: Live USDh FLH invariant probe
 
 on:
   push:
@@ -17,27 +17,16 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: Fetch immutable sources and print public/auth/call surface
+      - name: Fetch immutable FLH source and print execution/callback body
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p /tmp/contracts
-
-          fetch_source() {
-            local addr="$1" name="$2" label="$3"
-            local out="/tmp/contracts/${label}.clar"
-            curl --fail-with-body -sS \
-              "https://api.hiro.so/v2/contracts/source/${addr}/${name}?proof=0" \
-              | jq -r '.source' > "$out"
-            echo "=== ${label} ${addr}.${name} ==="
-            echo "bytes=$(wc -c <"$out")"
-            echo '--- public/read-only/private defs ---'
-            grep -nE '^\(define-(public|read-only|private)' "$out" || true
-            echo '--- auth-like lines ---'
-            grep -niE 'asserts!|tx-sender|contract-caller|owner|admin|keeper|authorized|whitelist' "$out" | head -200 || true
-            echo '--- Hermetica/USDh/Pyth calls ---'
-            grep -niE 'minting-auto|minting-auto-v1-2|SPN5AKG35QZSK2M8GAMR4AFX45659RJHDW353HSG|pyth|price-feed|decode-price|mint |redeem ' "$out" | head -240 || true
-          }
-
-          fetch_source 'SP1A27KFY4XERQCCRCARCYD1CC5N7M6688BSYADJ7' 'flh' 'zest_flh'
-          fetch_source 'SP1A4X1ZFXGE4J28ZQ9QG3JNRCQ4AK6R10PECHVVP' 'liquidator' 'liquidator'
+          curl --fail-with-body -sS \
+            'https://api.hiro.so/v2/contracts/source/SP1A27KFY4XERQCCRCARCYD1CC5N7M6688BSYADJ7/flh?proof=0' \
+            | jq -r '.source' > /tmp/flh.clar
+          echo '=== FLH lines 100-245 ==='
+          nl -ba /tmp/flh.clar | sed -n '100,245p'
+          echo '=== all external calls ==='
+          grep -n 'contract-call?' /tmp/flh.clar || true
+          echo '=== maps/data vars ==='
+          grep -nE '^\(define-(data-var|map|constant)' /tmp/flh.clar || true
