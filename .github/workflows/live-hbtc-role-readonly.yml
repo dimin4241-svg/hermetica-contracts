@@ -1,4 +1,4 @@
-name: Live USDh minting-auto whitelist probe
+name: Live USDh current minting-auto whitelist probe
 
 on:
   push:
@@ -19,19 +19,29 @@ jobs:
       HIRO_API_KEY: ${{ secrets.HIRO_API_KEY }}
     steps:
       - uses: actions/checkout@v4
-      - name: Enumerate set-whitelist print events from deployed minting-auto-state-v1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Collapse whitelist event history and verify current active entries
         shell: bash
         run: |
           set -euo pipefail
           node --input-type=module <<'NODE'
-          const CONTRACT='SPN5AKG35QZSK2M8GAMR4AFX45659RJHDW353HSG.minting-auto-state-v1';
+          import { Cl, serializeCV, deserializeCV, cvToJSON } from '@stacks/transactions';
+
+          const USDH='SPN5AKG35QZSK2M8GAMR4AFX45659RJHDW353HSG';
+          const CONTRACT=`${USDH}.minting-auto-state-v1`;
+          const SBTC='SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token';
           const API_KEY=process.env.HIRO_API_KEY || '';
           const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 
+          function hex(cv){const x=serializeCV(cv); return typeof x==='string'?(x.startsWith('0x')?x:'0x'+x):'0x'+Buffer.from(x).toString('hex');}
           async function getJson(url){
             for(let i=0;i<10;i++){
-              const headers={accept:'application/json'};
-              if(API_KEY) headers['x-api-key']=API_KEY;
+              const headers={accept:'application/json'}; if(API_KEY) headers['x-api-key']=API_KEY;
               const r=await fetch(url,{headers});
               if(r.status===429){await sleep(1500+i*1200);continue;}
               if(!r.ok) throw new Error(`${r.status} ${await r.text()}`);
@@ -39,23 +49,65 @@ jobs:
             }
             throw new Error('rate limit');
           }
+          async function readWhitelist(address,asset){
+            const headers={'content-type':'application/json'}; if(API_KEY) headers['x-api-key']=API_KEY;
+            const url=`https://api.hiro.so/v2/contracts/call-read/${USDH}/minting-auto-state-v1/get-whitelist`;
+            const body=JSON.stringify({sender:USDH,arguments:[hex(Cl.principal(address)),hex(Cl.principal(asset))]});
+            for(let i=0;i<10;i++){
+              const r=await fetch(url,{method:'POST',headers,body});
+              if(r.status===429){await sleep(1500+i*1200);continue;}
+              if(!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+              const j=await r.json();
+              if(!j.result) throw new Error(JSON.stringify(j));
+              return cvToJSON(deserializeCV(j.result));
+            }
+            throw new Error('rate limit');
+          }
 
-          const matches=[];
-          let totalEvents=0;
-          for(let offset=0; offset<1000; offset+=50){
+          const events=[];
+          for(let offset=0;offset<1000;offset+=50){
             const page=await getJson(`https://api.hiro.so/extended/v1/contract/${CONTRACT}/events?limit=50&offset=${offset}`);
-            const rows=page.results ?? [];
-            totalEvents += rows.length;
+            const rows=page.results??[];
             for(const e of rows){
-              const repr=e?.contract_log?.value?.repr ?? '';
-              if(repr.includes('minter') && repr.includes('redeemer') && repr.includes('price-slippage')){
-                matches.push({tx_id:e.tx_id,event_index:e.event_index,repr});
-              }
+              const repr=e?.contract_log?.value?.repr??'';
+              if(repr.includes('(minter ') && repr.includes('(redeemer ') && repr.includes('(price-slippage ')) events.push({tx_id:e.tx_id,repr});
             }
             if(rows.length<50) break;
-            await sleep(API_KEY?30:250);
+            await sleep(API_KEY?30:200);
           }
-          console.log(`TOTAL_EVENTS_SCANNED=${totalEvents}`);
-          console.log(`WHITELIST_EVENTS=${matches.length}`);
-          for(const m of matches) console.log('WHITELIST_EVENT=' + JSON.stringify(m));
+
+          // Hiro returns newest events first. First occurrence of address+asset is current map value.
+          const current=new Map();
+          const reAddress=/\(address '([^\)]+)\)/;
+          const reAsset=/\(asset '([^\)]+)\)/;
+          const reDelay=/\(new-values \(tuple \(block-delay u(\d+)\)/;
+          const reMinter=/\(minter (true|false)\)/;
+          const reSlip=/\(price-slippage u(\d+)\)/;
+          const reRedeemer=/\(redeemer (true|false)\)/;
+          for(const e of events){
+            const address=e.repr.match(reAddress)?.[1];
+            const asset=e.repr.match(reAsset)?.[1];
+            if(!address||!asset) continue;
+            const key=`${address}|${asset}`;
+            if(current.has(key)) continue;
+            current.set(key,{
+              address,asset,tx_id:e.tx_id,
+              blockDelay:Number(e.repr.match(reDelay)?.[1]??-1),
+              minter:e.repr.match(reMinter)?.[1]==='true',
+              redeemer:e.repr.match(reRedeemer)?.[1]==='true',
+              slippage:Number(e.repr.match(reSlip)?.[1]??-1),
+              isContract:address.includes('.'),
+            });
+          }
+
+          const active=[...current.values()].filter(x=>x.asset===SBTC && (x.minter||x.redeemer));
+          console.log(`CURRENT_SBTC_ACTIVE_COUNT=${active.length}`);
+          for(const x of active){
+            const live=await readWhitelist(x.address,x.asset);
+            console.log('CURRENT_SBTC_ACTIVE=' + JSON.stringify({...x,live}));
+            await sleep(120);
+          }
+          const standard=active.filter(x=>!x.isContract);
+          console.log(`CURRENT_SBTC_ACTIVE_STANDARD_COUNT=${standard.length}`);
+          for(const x of standard) console.log('CURRENT_SBTC_ACTIVE_STANDARD=' + JSON.stringify(x));
           NODE
