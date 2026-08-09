@@ -1,4 +1,4 @@
-name: Map historical hBTC harvest offsets
+name: Pinpoint May hBTC harvest windows
 
 on:
   push:
@@ -14,47 +14,48 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 7
+    timeout-minutes: 5
     env:
       HIRO_API_KEY: ${{ secrets.HIRO_API_KEY }}
     steps:
       - uses: actions/checkout@v4
-      - name: Sample Zest and Controller offsets
+      - name: Find May 26-27 sweep reward txs
         shell: bash
         run: |
           set -euo pipefail
           node --input-type=module <<'NODE'
           const O='SP1S1HSFH0SQQGWKB69EYFNY0B1MHRMGXR3J1FH4D';
-          const targets=[['ZEST',`${O}.zest-interface-hbtc-v1`,'(action "sweep")'],['CTRL',`${O}.controller-hbtc-v1`,'(action "log-reward")']];
-          const offsets=[300,400,500,550,600,650,700,750,800,850];
+          const configs=[
+            ['ZEST',`${O}.zest-interface-hbtc-v1`,'(action "sweep")',[100,150,175,200,225,250,275]],
+            ['CTRL',`${O}.controller-hbtc-v1`,'(action "log-reward")',[0,50,75,100,125,150,175,200,225,250]]
+          ];
           const KEY=process.env.HIRO_API_KEY||'';
           const sleep=ms=>new Promise(r=>setTimeout(r,ms));
           async function req(url){
-            for(let i=0;i<12;i++){
+            for(let i=0;i<10;i++){
               const h={accept:'application/json'};if(KEY)h['x-api-key']=KEY;
               const r=await fetch(url,{headers:h});
-              if(r.status===429){await sleep(2500+i*1200);continue;}
+              if(r.status===429){await sleep(1400+i*900);continue;}
               if(!r.ok) throw new Error(`${r.status} ${await r.text()}`);
               return await r.json();
             }
             return null;
           }
-          async function tx(id){
-            const t=await req(`https://api.hiro.so/extended/v1/tx/${id}`);
-            if(!t)return null;
-            return {tx_id:id,block_height:t.block_height,burn_block_time_iso:t.burn_block_time_iso,function_name:t.contract_call?.function_name};
-          }
-          for(const [label,contract,needle] of targets){
+          async function tx(id){const t=await req(`https://api.hiro.so/extended/v1/tx/${id}`);return t?{tx_id:id,block_height:t.block_height,time:t.burn_block_time_iso,sender:t.sender_address,function_name:t.contract_call?.function_name}:null;}
+          for(const [label,contract,needle,offsets] of configs){
+            const seen=new Set();
             for(const offset of offsets){
-              const p=await req(`https://api.hiro.so/extended/v1/contract/${contract}/events?limit=50&offset=${offset}`);
-              if(!p){console.log(`${label}_OFFSET_${offset}=RATE_LIMIT`);continue;}
-              const m=(p.results??[]).filter(e=>(e?.contract_log?.value?.repr??'').includes(needle));
-              if(!m.length){console.log(`${label}_OFFSET_${offset}=NO_MATCH`);await sleep(800);continue;}
-              const first=m[0],last=m[m.length-1];
-              const ft=await tx(first.tx_id); await sleep(500);
-              const lt=first.tx_id===last.tx_id?ft:await tx(last.tx_id);
-              console.log(`${label}_OFFSET_${offset}=`+JSON.stringify({matches:m.length,first:ft,last:lt,first_repr:first.contract_log?.value?.repr,last_repr:last.contract_log?.value?.repr}));
-              await sleep(1300);
+              const p=await req(`https://api.hiro.so/extended/v1/contract/${contract}/events?limit=50&offset=${offset}`); if(!p)continue;
+              for(const e of p.results??[]){
+                if(seen.has(e.tx_id))continue;
+                const repr=e?.contract_log?.value?.repr??''; if(!repr.includes(needle))continue;
+                const t=await tx(e.tx_id); if(!t)continue;
+                if((t.time||'').startsWith('2026-05-26')||(t.time||'').startsWith('2026-05-27')){
+                  seen.add(e.tx_id);
+                  console.log(label+'_MAY='+JSON.stringify({tx:t,repr}));
+                }
+              }
+              await sleep(300);
             }
           }
           NODE
