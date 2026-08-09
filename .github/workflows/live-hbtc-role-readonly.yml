@@ -59,13 +59,18 @@ jobs:
             if(!j.okay) throw new Error(`${contract}.${fn}: ${JSON.stringify(j)}`);
             return j.result;
           }
-          function cvUInt(v){
+          function unwrapResponseHex(v){
             let h=String(v).replace(/^0x/,'');
+            if(h.slice(0,2)==='07') h=h.slice(2);
+            return h;
+          }
+          function cvUInt(v){
+            const h=unwrapResponseHex(v);
             if(h.slice(0,2)!=='01') throw new Error(`not uint cv: ${v}`);
             return BigInt('0x'+h.slice(2));
           }
           function cvBool(v){
-            const h=String(v).replace(/^0x/,'').slice(0,2);
+            const h=unwrapResponseHex(v).slice(0,2);
             if(h==='03') return true;
             if(h==='04') return false;
             throw new Error(`not bool cv: ${v}`);
