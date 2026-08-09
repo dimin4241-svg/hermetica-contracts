@@ -14,7 +14,7 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 7
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -22,7 +22,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Read current claim and funding history only
+      - name: Read current claim, funding, and redeem-pause history only
         shell: bash
         run: |
           set -euo pipefail
@@ -36,7 +36,7 @@ jobs:
           const KEY=process.env.HIRO_API_KEY||'';
           const sleep=ms=>new Promise(r=>setTimeout(r,ms));
           async function req(url,opts={}){
-            for(let i=0;i<10;i++){
+            for(let i=0;i<12;i++){
               const headers={accept:'application/json',...(opts.headers||{})};
               if(KEY) headers['x-api-key']=KEY;
               const r=await fetch(url,{...opts,headers});
@@ -68,7 +68,7 @@ jobs:
           console.log(`REDEEM_ENABLED=${redeemEnabled}`);
 
           let processCount=0, nonManagerCount=0, managerCount=0, batchCount=0;
-          outer: for(let offset=0;offset<500;offset+=50){
+          outer: for(let offset=0;offset<1000;offset+=50){
             const page=await req(`https://api.hiro.so/extended/v1/contract/${V}/events?limit=50&offset=${offset}`);
             for(const e of page.results??[]){
               const repr=e?.contract_log?.value?.repr??'';
@@ -76,16 +76,33 @@ jobs:
               processCount++;
               if(repr.includes('(manager (some false))')){
                 nonManagerCount++;
-                console.log('NON_MANAGER_PROCESS='+JSON.stringify({tx_id:e.tx_id,repr}));
+                console.log('NON_MANAGER_PROCESS='+JSON.stringify({tx_id:e.tx_id,block_height:e.block_height,repr}));
               } else if(repr.includes('(manager (some true))')){
                 managerCount++;
               } else if(repr.includes('(manager none)')){
                 batchCount++;
               }
-              if(processCount>=80) break outer;
             }
             if((page.results??[]).length<50) break;
-            await sleep(250);
+            await sleep(100);
           }
           console.log(`PROCESS_COUNTS total=${processCount} non_manager=${nonManagerCount} manager=${managerCount} batch_none=${batchCount}`);
+
+          let scanned=0, pauseEvents=0;
+          for(let offset=0;offset<10000;offset+=50){
+            const page=await req(`https://api.hiro.so/extended/v1/contract/${S}/events?limit=50&offset=${offset}`);
+            const rows=page.results??[];
+            scanned+=rows.length;
+            for(const e of rows){
+              const repr=e?.contract_log?.value?.repr??'';
+              if(repr.includes('(action "disable-redeem")') || repr.includes('(action "set-redeem-enabled")')){
+                pauseEvents++;
+                console.log('REDEEM_FLAG_EVENT='+JSON.stringify({tx_id:e.tx_id,block_height:e.block_height,burn_block_time:e.burn_block_time,repr}));
+              }
+            }
+            if(rows.length<50) break;
+            await sleep(75);
+          }
+          console.log(`STATE_EVENTS_SCANNED=${scanned}`);
+          console.log(`REDEEM_FLAG_EVENTS=${pauseEvents}`);
           NODE
