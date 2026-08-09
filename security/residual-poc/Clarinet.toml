@@ -1,29 +1,24 @@
 [project]
 name = 'hbtc-residual-supply-poc'
-description = 'Isolated proof using production hBTC State and Token'
+description = 'Isolated proof using production hBTC State'
 authors = []
 telemetry = false
 cache_dir = '.cache'
-
-[contracts.sip-010-trait]
-path = '../../mainnet/contracts/usdh/traits/sip-010-trait.clar'
-clarity_version = 2
-epoch = 2.5
 
 [contracts.hq-hbtc]
 path = 'mock-hq.clar'
 clarity_version = 4
 epoch = 3.3
 
-[contracts.blacklist]
-path = 'mock-blacklist.clar'
+[contracts.token-hbtc]
+path = 'supply-fixture.clar'
 clarity_version = 4
 epoch = 3.3
 
-[contracts.token-hbtc]
-path = '../../mainnet/contracts/hbtc/tokens/token-hbtc.clar'
-clarity_version = 4
-epoch = 3.3
+[contracts.sip-010-trait]
+path = '../../mainnet/contracts/usdh/traits/sip-010-trait.clar'
+clarity_version = 2
+epoch = 2.5
 
 [contracts.state]
 path = '../../mainnet/contracts/hbtc/protocol/state-v1.clar'
