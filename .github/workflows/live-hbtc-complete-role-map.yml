@@ -23,7 +23,7 @@ jobs:
           set -euo pipefail
           node --input-type=module <<'NODE'
           const O='SP1S1HSFH0SQQGWKB69EYFNY0B1MHRMGXR3J1FH4D';
-          const HQ=`${O}.hq-hbtc-v1`;
+          const HQ=`${O}.hq-v1`;
           const sleep=ms=>new Promise(r=>setTimeout(r,ms));
           async function req(url){
             for(let i=0;i<12;i++){
