@@ -70,6 +70,11 @@ path = '../../../mainnet/contracts/usdh/tokens/susdh-token-v1.clar'
 clarity_version = 2
 epoch = 2.5
 
+[contracts.minting-state]
+path = '../../../mainnet/contracts/usdh/protocol/minting-state-v1.clar'
+clarity_version = 2
+epoch = 2.5
+
 [contracts.minting-otc]
 path = '../../../mainnet/contracts/usdh/protocol/minting-otc-v1-1.clar'
 clarity_version = 4
