@@ -1,4 +1,4 @@
-name: Live hBTC role read-only probe
+name: Live hBTC read-only configuration probe
 
 on:
   push:
@@ -26,42 +26,54 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Query deployed HQ roles without state changes
+      - name: Query deployed HQ roles and State externals without state changes
         shell: bash
         run: |
           set -euo pipefail
 
-          HQ_ADDR='SP1S1HSFH0SQQGWKB69EYFNY0B1MHRMGXR3J1FH4D'
+          DEPLOYER='SP1S1HSFH0SQQGWKB69EYFNY0B1MHRMGXR3J1FH4D'
           HQ_NAME='hq-v1'
-          TRADING='SP1S1HSFH0SQQGWKB69EYFNY0B1MHRMGXR3J1FH4D.trading-hbtc-v1'
+          STATE_NAME='state-hbtc-v1'
+          TRADING="${DEPLOYER}.trading-hbtc-v1"
 
-          ARG=$(TRADING="$TRADING" node --input-type=module <<'NODE'
+          clarity_principal() {
+            PRINCIPAL="$1" node --input-type=module <<'NODE'
           import { Cl, serializeCV } from '@stacks/transactions';
-          const raw = serializeCV(Cl.principal(process.env.TRADING));
+          const raw = serializeCV(Cl.principal(process.env.PRINCIPAL));
           if (typeof raw === 'string') {
             console.log(raw.startsWith('0x') ? raw : '0x' + raw);
           } else {
             console.log('0x' + Buffer.from(raw).toString('hex'));
           }
           NODE
-          )
+          }
 
-          echo "trading=$TRADING"
-          echo "clarity_arg=$ARG"
-
-          for FN in get-trader get-manager get-rewarder get-protocol; do
-            echo "=== $FN ==="
+          call_read() {
+            local contract_name="$1" fn="$2" arg="$3"
             curl --fail-with-body -sS \
               -X POST \
               -H 'content-type: application/json' \
-              "https://api.hiro.so/v2/contracts/call-read/${HQ_ADDR}/${HQ_NAME}/${FN}" \
-              --data "{\"sender\":\"${HQ_ADDR}\",\"arguments\":[\"${ARG}\"]}" \
-              | tee "/tmp/${FN}.json"
-            echo
+              "https://api.hiro.so/v2/contracts/call-read/${DEPLOYER}/${contract_name}/${fn}" \
+              --data "{\"sender\":\"${DEPLOYER}\",\"arguments\":[\"${arg}\"]}"
+          }
+
+          echo '=== Trading live roles ==='
+          TARG="$(clarity_principal "$TRADING")"
+          for FN in get-trader get-manager get-rewarder get-protocol; do
+            RESULT="$(call_read "$HQ_NAME" "$FN" "$TARG" | jq -r '.result // .cause // .')"
+            echo "${FN}=${RESULT}"
           done
 
-          echo '=== summary ==='
-          for FN in get-trader get-manager get-rewarder get-protocol; do
-            printf '%s=' "$FN"
-            jq -r '.result // .cause // .' "/tmp/${FN}.json"
-          done
+          echo '=== State live externals ==='
+          while IFS='|' read -r LABEL PRINCIPAL; do
+            ARG="$(clarity_principal "$PRINCIPAL")"
+            RESULT="$(call_read "$STATE_NAME" get-external "$ARG" | jq -r '.result // .cause // .')"
+            echo "${LABEL}=${RESULT} ${PRINCIPAL}"
+          done <<'EOF'
+          zest_v0_3|SP1A27KFY4XERQCCRCARCYD1CC5N7M6688BSYADJ7.v0-3-market
+          zest_v0_4|SP1A27KFY4XERQCCRCARCYD1CC5N7M6688BSYADJ7.v0-4-market
+          zest_vault_sbtc|SP1A27KFY4XERQCCRCARCYD1CC5N7M6688BSYADJ7.v0-vault-sbtc
+          zest_vault_usdh|SP1A27KFY4XERQCCRCARCYD1CC5N7M6688BSYADJ7.v0-vault-usdh
+          staking_v1_1|SPN5AKG35QZSK2M8GAMR4AFX45659RJHDW353HSG.staking-v1-1
+          staking_silo_v1_1|SPN5AKG35QZSK2M8GAMR4AFX45659RJHDW353HSG.staking-silo-v1-1
+          EOF
