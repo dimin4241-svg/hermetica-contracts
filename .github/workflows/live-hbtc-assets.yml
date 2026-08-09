@@ -17,38 +17,53 @@ jobs:
     timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
-      - name: Reconstruct current State asset set from events
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Query current State asset candidates
         shell: bash
         run: |
           set -euo pipefail
           node --input-type=module <<'NODE'
+          import { Cl, serializeCV, deserializeCV, cvToString } from '@stacks/transactions';
           const O='SP1S1HSFH0SQQGWKB69EYFNY0B1MHRMGXR3J1FH4D';
           const STATE=`${O}.state-hbtc-v1`;
+          const candidates=[
+            'SP1A27KFY4XERQCCRCARCYD1CC5N7M6688BSYADJ7.wstx',
+            'SP1A27KFY4XERQCCRCARCYD1CC5N7M6688BSYADJ7.v0-vault-stx',
+            'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token',
+            'SP1A27KFY4XERQCCRCARCYD1CC5N7M6688BSYADJ7.v0-vault-sbtc',
+            'SP4SZE494VC2YC5JYG7AYFQ44F5Q4PYV7DVMDPBG.ststx-token',
+            'SP1A27KFY4XERQCCRCARCYD1CC5N7M6688BSYADJ7.v0-vault-ststx',
+            'SP120SBRBQJ00MCWS7TM5R8WJNTTKD5K0HFRC2CNE.usdcx',
+            'SP1A27KFY4XERQCCRCARCYD1CC5N7M6688BSYADJ7.v0-vault-usdc',
+            'SPN5AKG35QZSK2M8GAMR4AFX45659RJHDW353HSG.usdh-token-v1',
+            'SPN5AKG35QZSK2M8GAMR4AFX45659RJHDW353HSG.susdh-token-v1',
+            'SP1A27KFY4XERQCCRCARCYD1CC5N7M6688BSYADJ7.v0-vault-usdh',
+            'SP4SZE494VC2YC5JYG7AYFQ44F5Q4PYV7DVMDPBG.ststxbtc-token-v2',
+            'SP1A27KFY4XERQCCRCARCYD1CC5N7M6688BSYADJ7.v0-vault-ststxbtc'
+          ];
           const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-          async function req(url){
+          async function req(url,opts={}){
             for(let i=0;i<10;i++){
-              const r=await fetch(url,{headers:{accept:'application/json'}});
-              if(r.status===429){await sleep(1200+i*800);continue;}
+              const r=await fetch(url,{...opts,headers:{accept:'application/json',...(opts.headers||{})}});
+              if(r.status===429){await sleep(1000+i*800);continue;}
               if(!r.ok) throw new Error(`${r.status} ${await r.text()}`);
               return await r.json();
             }
-            throw new Error('rate limit '+url);
+            throw new Error('rate limit');
           }
-          const latest=new Map();
-          for(let offset=0;offset<1800;offset+=50){
-            const p=await req(`https://api.hiro.so/extended/v1/contract/${STATE}/events?limit=50&offset=${offset}`);
-            const rows=p.results??[];
-            for(const e of rows){
-              const repr=e?.contract_log?.value?.repr??'';
-              if(!repr.includes('(action "confirm-update")')) continue;
-              // ASSET update type 0xa0; event contains address + is-add.
-              if(!repr.includes('(type 0xa0)')) continue;
-              const addr=repr.match(/\(address \(some '([^\)]+)\)\)/)?.[1];
-              const add=repr.includes('(is-add true)');
-              if(addr && !latest.has(addr)) latest.set(addr,{active:add,tx_id:e.tx_id,repr});
-            }
-            if(rows.length<50) break;
-            await sleep(200);
+          function arg(cv){const x=serializeCV(cv);return typeof x==='string'?(x.startsWith('0x')?x:'0x'+x):'0x'+Buffer.from(x).toString('hex');}
+          async function ro(fn,args=[]){
+            const dot=STATE.indexOf('.');
+            const j=await req(`https://api.hiro.so/v2/contracts/call-read/${STATE.slice(0,dot)}/${STATE.slice(dot+1)}/${fn}`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({sender:O,arguments:args.map(arg)})});
+            if(!j.okay) throw new Error(JSON.stringify(j));
+            return cvToString(deserializeCV(j.result));
           }
-          for(const [address,v] of latest) console.log('ASSET='+JSON.stringify({address,...v}));
+          for(const a of candidates){
+            console.log(`ASSET ${a} => ${await ro('get-asset',[Cl.principal(a)])}`);
+            await sleep(120);
+          }
           NODE
