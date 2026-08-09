@@ -111,8 +111,6 @@ function canonicalExecutableSource(src, isLocal) {
   if (isLocal) {
     for (const [from, to] of ALIASES) s = s.split(from).join(to);
   }
-  // Deployment can rename trait-only contracts while executable behavior remains identical.
-  // We already compare all callable functions/state/auth separately, so strip declaration-only trait lines above.
   return s.replace(/\s+/g, ' ').trim();
 }
 
@@ -127,6 +125,7 @@ for (const [liveName, localPath] of CONTRACTS) {
   const semanticDiff = compareFingerprints(localFp, liveFp);
   const localCanonical = canonicalExecutableSource(localSource, true);
   const liveCanonical = canonicalExecutableSource(liveSource, false);
+  const bodyMatch = localCanonical === liveCanonical;
   results.push({
     live_contract: `${DEPLOYER}.${liveName}`,
     local_path: localPath,
@@ -135,20 +134,22 @@ for (const [liveName, localPath] of CONTRACTS) {
     exact_source_match: liveSource === localSource,
     canonical_executable_local_sha256: sha(localCanonical),
     canonical_executable_live_sha256: sha(liveCanonical),
-    canonical_executable_match: localCanonical === liveCanonical,
+    canonical_executable_match: bodyMatch,
+    canonical_local_source: bodyMatch ? null : localCanonical,
+    canonical_live_source: bodyMatch ? null : liveCanonical,
     semantic_diff: semanticDiff,
     semantic_drift_detected: hasDiff(semanticDiff),
     local_fingerprint: localFp,
     live_fingerprint: liveFp,
   });
-  console.log(`SEMANTIC_DRIFT ${liveName}=${hasDiff(semanticDiff)} FULL_CANONICAL_MATCH=${localCanonical === liveCanonical}`);
+  console.log(`SEMANTIC_DRIFT ${liveName}=${hasDiff(semanticDiff)} FULL_CANONICAL_MATCH=${bodyMatch}`);
   await sleep(180);
 }
 
 const drift = results.filter(r => r.semantic_drift_detected || !r.canonical_executable_match);
 const evidence = {
   observed_at: new Date().toISOString(),
-  methodology: 'Read-only Hiro deployed-source fetch versus checked-out repository. Full executable source is canonicalized for known deployment aliases; function/state/auth fingerprints are compared independently.',
+  methodology: 'Read-only Hiro deployed-source fetch versus checked-out repository. Full executable source is canonicalized for known deployment aliases; mismatch bodies are retained for token-level offline diffing.',
   results,
   contracts_with_semantic_or_body_drift: drift.map(r => r.live_contract),
 };
