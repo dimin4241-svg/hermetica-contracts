@@ -1,4 +1,4 @@
-name: Live hBTC deployed-source diff probe
+name: Live hBTC deployed-source semantic diff probe
 
 on:
   push:
@@ -18,7 +18,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Fetch immutable deployed v1-2 source and compare with repository master
+      - name: Normalize deployment aliases and compare v1-2 logic
         shell: bash
         run: |
           set -euo pipefail
@@ -26,16 +26,22 @@ jobs:
           curl --fail-with-body -sS "$URL" -o /tmp/deployed.json
           jq -r '.source' /tmp/deployed.json > /tmp/deployed.clar
 
-          echo '=== metadata ==='
-          jq '{publish_height, proof}' /tmp/deployed.json
-          echo "deployed_bytes=$(wc -c </tmp/deployed.clar)"
-          echo "master_bytes=$(wc -c <mainnet/contracts/hbtc/protocol/vault-v1-2.clar)"
+          cp /tmp/deployed.clar /tmp/normalized.clar
+          sed -i \
+            -e 's/\.reserve-hbtc-v1/\.reserve/g' \
+            -e 's/\.fee-collector-hbtc-v1/\.fee-collector/g' \
+            -e 's/\.state-hbtc-v1/\.state/g' \
+            -e 's/\.blacklist-v1/\.blacklist/g' \
+            -e 's/\.hq-v1/\.hq-hbtc/g' \
+            /tmp/normalized.clar
+
           echo "deployed_sha256=$(sha256sum /tmp/deployed.clar | cut -d' ' -f1)"
+          echo "normalized_sha256=$(sha256sum /tmp/normalized.clar | cut -d' ' -f1)"
           echo "master_sha256=$(sha256sum mainnet/contracts/hbtc/protocol/vault-v1-2.clar | cut -d' ' -f1)"
 
-          if cmp -s /tmp/deployed.clar mainnet/contracts/hbtc/protocol/vault-v1-2.clar; then
-            echo 'DEPLOYED_VS_MASTER=BYTE_EXACT'
+          if cmp -s /tmp/normalized.clar mainnet/contracts/hbtc/protocol/vault-v1-2.clar; then
+            echo 'NORMALIZED_DEPLOYED_VS_MASTER=BYTE_EXACT'
           else
-            echo 'DEPLOYED_VS_MASTER=DIFFERENT'
-            diff -u /tmp/deployed.clar mainnet/contracts/hbtc/protocol/vault-v1-2.clar || true
+            echo 'NORMALIZED_DEPLOYED_VS_MASTER=DIFFERENT'
+            diff -u /tmp/normalized.clar mainnet/contracts/hbtc/protocol/vault-v1-2.clar || true
           fi
