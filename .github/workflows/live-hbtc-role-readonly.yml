@@ -15,6 +15,8 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      HIRO_API_KEY: ${{ secrets.HIRO_API_KEY }}
     steps:
       - uses: actions/checkout@v4
 
@@ -26,7 +28,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Enumerate live v1-2 claims and reconcile escrow balances
+      - name: Reconcile newest outstanding v1-2 claims against escrow balances
         shell: bash
         run: |
           set -euo pipefail
@@ -36,7 +38,7 @@ jobs:
           const HBTC = 'SP1S1HSFH0SQQGWKB69EYFNY0B1MHRMGXR3J1FH4D';
           const SBTC = 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4';
           const VAULT = `${HBTC}.vault-hbtc-v1-2`;
-
+          const API_KEY = process.env.HIRO_API_KEY || '';
           const sleep = ms => new Promise(r => setTimeout(r, ms));
 
           function hex(cv) {
@@ -48,14 +50,14 @@ jobs:
           async function read(addr, name, fn, args = []) {
             const url = `https://api.hiro.so/v2/contracts/call-read/${addr}/${name}/${fn}`;
             const body = JSON.stringify({ sender: HBTC, arguments: args.map(hex) });
-            for (let attempt = 0; attempt < 8; attempt++) {
-              const r = await fetch(url, {
-                method: 'POST',
-                headers: { 'content-type': 'application/json' },
-                body,
-              });
+            for (let attempt = 0; attempt < 12; attempt++) {
+              const headers = { 'content-type': 'application/json' };
+              if (API_KEY) headers['x-api-key'] = API_KEY;
+              const r = await fetch(url, { method: 'POST', headers, body });
               if (r.status === 429) {
-                await sleep(700 + attempt * 500);
+                const wait = 5000 + attempt * 3000;
+                console.log(`rate_limit fn=${fn} attempt=${attempt + 1} wait_ms=${wait}`);
+                await sleep(wait);
                 continue;
               }
               if (!r.ok) throw new Error(`${fn}: HTTP ${r.status} ${await r.text()}`);
@@ -71,68 +73,61 @@ jobs:
             return BigInt(j.value);
           }
 
-          const claimCounter = await read(HBTC, 'state-hbtc-v1', 'get-claim-id');
-          const maxId = Number(uintValue(claimCounter));
-          console.log(`global_claim_id=${maxId}`);
-
+          const maxId = Number(uintValue(await read(HBTC, 'state-hbtc-v1', 'get-claim-id')));
           const principalArg = Cl.principal(VAULT);
-          const hbtcBalJ = await read(HBTC, 'token-hbtc', 'get-balance', [principalArg]);
-          const sbtcBalJ = await read(SBTC, 'sbtc-token', 'get-balance', [principalArg]);
-          const hbtcBalance = uintValue(hbtcBalJ);
-          const sbtcBalance = uintValue(sbtcBalJ);
+          const hbtcBalance = uintValue(await read(HBTC, 'token-hbtc', 'get-balance', [principalArg]));
+          const sbtcBalance = uintValue(await read(SBTC, 'sbtc-token', 'get-balance', [principalArg]));
+
+          console.log(`global_claim_id=${maxId}`);
           console.log(`vault_hbtc_balance=${hbtcBalance}`);
           console.log(`vault_sbtc_balance=${sbtcBalance}`);
+          console.log(`hiro_api_key_present=${API_KEY ? 'yes' : 'no'}`);
 
           let unfundedShares = 0n;
           let fundedAssets = 0n;
-          let unfundedCount = 0;
-          let fundedCount = 0;
           const outstanding = [];
+          let scanned = 0;
+          let firstMatchedAt = null;
 
-          for (let id = 1; id <= maxId; id++) {
+          for (let id = maxId; id >= 1; id--) {
             const j = await read(HBTC, 'vault-hbtc-v1-2', 'get-claim', [Cl.uint(id)]);
-            if (j.success !== true) {
-              await sleep(120);
-              continue;
+            scanned++;
+            if (j.success === true) {
+              const t = j.value.value;
+              const shares = BigInt(t.shares.value);
+              const assetsNode = t.assets.value;
+              const funded = assetsNode !== null;
+              const assets = funded ? BigInt(assetsNode.value) : null;
+              if (funded) fundedAssets += assets;
+              else unfundedShares += shares;
+              const row = {
+                id,
+                user: t.user.value,
+                shares: shares.toString(),
+                funded,
+                assets: assets?.toString() ?? null,
+                fee: t.fee.value === null ? null : t.fee.value.value,
+                express: t['is-express'].value,
+                ts: t.ts.value,
+              };
+              outstanding.push(row);
+              console.log('claim=' + JSON.stringify(row));
             }
 
-            const t = j.value.value;
-            const shares = BigInt(t.shares.value);
-            const user = t.user.value;
-            const express = t['is-express'].value;
-            const ts = BigInt(t.ts.value);
-            const assetsNode = t.assets.value;
-            const funded = assetsNode !== null;
-            const assets = funded ? BigInt(assetsNode.value) : null;
-
-            if (funded) {
-              fundedCount++;
-              fundedAssets += assets;
-            } else {
-              unfundedCount++;
-              unfundedShares += shares;
+            if (unfundedShares === hbtcBalance && fundedAssets === sbtcBalance) {
+              firstMatchedAt = id;
+              break;
             }
-            outstanding.push({ id, user, shares: shares.toString(), funded, assets: assets?.toString() ?? null, express, ts: ts.toString() });
-            await sleep(120);
+            await sleep(API_KEY ? 80 : 1000);
           }
 
-          console.log(`outstanding_claims=${outstanding.length}`);
-          console.log(`unfunded_count=${unfundedCount}`);
-          console.log(`funded_count=${fundedCount}`);
+          console.log(`scanned_claim_ids=${scanned}`);
+          console.log(`outstanding_claims_found=${outstanding.length}`);
           console.log(`sum_unfunded_shares=${unfundedShares}`);
           console.log(`sum_funded_assets=${fundedAssets}`);
           console.log(`hbtc_escrow_delta=${hbtcBalance - unfundedShares}`);
           console.log(`sbtc_escrow_delta=${sbtcBalance - fundedAssets}`);
-          console.log('claims_json=' + JSON.stringify(outstanding));
-
-          if (hbtcBalance !== unfundedShares) {
-            console.log('INVARIANT_HBTC_ESCROW=MISMATCH');
-          } else {
-            console.log('INVARIANT_HBTC_ESCROW=EXACT');
-          }
-          if (sbtcBalance !== fundedAssets) {
-            console.log('INVARIANT_SBTC_ESCROW=MISMATCH');
-          } else {
-            console.log('INVARIANT_SBTC_ESCROW=EXACT');
-          }
+          console.log(`matched_at_claim_id=${firstMatchedAt ?? 'none'}`);
+          console.log(`INVARIANT_HBTC_ESCROW=${hbtcBalance === unfundedShares ? 'EXACT' : 'MISMATCH'}`);
+          console.log(`INVARIANT_SBTC_ESCROW=${sbtcBalance === fundedAssets ? 'EXACT' : 'MISMATCH'}`);
           NODE
