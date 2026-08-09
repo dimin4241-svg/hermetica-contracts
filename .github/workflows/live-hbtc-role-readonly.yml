@@ -44,8 +44,7 @@ jobs:
               const r=await fetch(url,{method:'POST',headers:{'content-type':'application/json'},body});
               if(r.status===429){await sleep(2000+i*1500);continue;}
               if(!r.ok) throw new Error(`${name}.${fn}: ${r.status} ${await r.text()}`);
-              const j=await r.json();
-              if(!j.result) throw new Error(JSON.stringify(j));
+              const j=await r.json(); if(!j.result) throw new Error(JSON.stringify(j));
               return cvToJSON(deserializeCV(j.result));
             }
             throw new Error('rate limit');
@@ -66,16 +65,9 @@ jobs:
           console.log('supported_sbtc=' + JSON.stringify(supportedJ));
           console.log('hbtc_asset=' + JSON.stringify(hAssetJ));
 
-          const mintFee=u(mintFeeJ);
-          const redeemFee=u(redeemFeeJ);
-          const minUsdh=u(minJ);
-          const wl=wlJ.value;
-          const slip=BigInt(wl.value['price-slippage'].value);
-          const tokenBase=100_000_000n;
-          const usdhBase=100_000_000n;
-          const priceBase=100_000_000n;
-          const bps=10_000n;
-
+          const mintFee=u(mintFeeJ), redeemFee=u(redeemFeeJ), minUsdh=u(minJ);
+          const slip=BigInt(wlJ.value['price-slippage'].value);
+          const tokenBase=100_000_000n, usdhBase=100_000_000n, priceBase=100_000_000n, bps=10_000n;
           console.log(`CONFIG|minUsdh=${minUsdh}|slipBps=${slip}|mintFee=${mintFee}|redeemFee=${redeemFee}`);
 
           function mintRequired(amountUsdh, price){
@@ -85,7 +77,6 @@ jobs:
             const before=(amountUsdh*priceBase*tokenBase)/price/usdhBase;
             const assetSlip=required-before;
             const fee=(assetSlip*mintFee)/bps;
-            // Caller must have at least required; required is split custody + fee.
             return {required,before,fee};
           }
           function redeemOut(amountUsdh, price){
@@ -99,15 +90,13 @@ jobs:
           }
 
           let best=null;
-          // Prices are Pyth integer prices with expo=-8. Sweep BTC $1k-$500k.
           for(let usd=1000; usd<=500000; usd+=1000){
             const price=BigInt(usd)*priceBase;
-            for(const mult of [1n,2n,3n,10n,100n,1000n]){
+            for(const mult of [1n,2n,3n,10n,100n,1000n,10000n]){
               const amount=minUsdh*mult;
-              const m=mintRequired(amount,price);
-              const r=redeemOut(amount,price);
+              const m=mintRequired(amount,price), r=redeemOut(amount,price);
               const delta=r.out-m.required;
-              if(best===null || delta>best.delta) best={usd,amount,delta,...m,...r};
+              if(best===null || delta>best.delta) best={usd,amount,delta,mintIn:m.required,redeemOut:r.out};
               if(delta>0n){
                 console.log('POSITIVE_ROUNDTRIP=' + JSON.stringify({usd,amount:amount.toString(),delta:delta.toString()}));
                 process.exit(2);
