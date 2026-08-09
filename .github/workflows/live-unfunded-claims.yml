@@ -1,0 +1,69 @@
+name: Live hBTC unfunded claims scan
+
+on:
+  push:
+    branches: [evidence/live-hbtc-role-readonly]
+    paths: [.github/workflows/live-unfunded-claims.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Read current claim map only
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import { Cl, serializeCV, deserializeCV, cvToString } from '@stacks/transactions';
+          const O='SP1S1HSFH0SQQGWKB69EYFNY0B1MHRMGXR3J1FH4D';
+          const V='vault-hbtc-v1-2';
+          const S='state-hbtc-v1';
+          const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+          async function req(url,opts={}){
+            for(let i=0;i<10;i++){
+              const r=await fetch(url,opts);
+              if(r.status===429){await sleep(700+i*500);continue;}
+              if(!r.ok) throw new Error(`${r.status} ${url} ${await r.text()}`);
+              return r.json();
+            }
+            throw new Error('rate limit '+url);
+          }
+          async function ro(contract,fn,args=[]){
+            const j=await req(`https://api.hiro.so/v2/contracts/call-read/${O}/${contract}/${fn}`,{
+              method:'POST',headers:{'content-type':'application/json'},
+              body:JSON.stringify({sender:O,arguments:args})
+            });
+            if(!j.okay) return null;
+            return cvToString(deserializeCV(j.result));
+          }
+          const claimIdRaw=await ro(S,'get-claim-id');
+          const max=Number((claimIdRaw||'').match(/u(\d+)/)?.[1]||0);
+          const now=Math.floor(Date.now()/1000);
+          console.log(`NOW=${now} CLAIM_ID=${max}`);
+          let live=0, unfunded=0, mature=0;
+          for(let id=1;id<=max;id++){
+            const arg='0x'+serializeCV(Cl.uint(id));
+            const repr=await ro(V,'get-claim',[arg]);
+            if(!repr || repr.startsWith('(err ')) { await sleep(35); continue; }
+            live++;
+            const isUnfunded=repr.includes('(assets none)');
+            const isExpress=repr.includes('(is-express true)');
+            const ts=Number(repr.match(/\(ts u(\d+)\)/)?.[1]||0);
+            const isMature=ts>0 && ts<=now;
+            if(isUnfunded) unfunded++;
+            if(isUnfunded && !isExpress && isMature) mature++;
+            console.log('LIVE_CLAIM='+JSON.stringify({id,isUnfunded,isExpress,ts,isMature,repr}));
+            await sleep(35);
+          }
+          console.log(`SUMMARY live=${live} unfunded=${unfunded} mature_regular_unfunded=${mature}`);
+          NODE
