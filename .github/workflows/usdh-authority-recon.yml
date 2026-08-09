@@ -6,6 +6,7 @@ on:
       - validation-usdh-jit-reward-poc
     paths:
       - 'tests/security/usdh/read-live-usdh-full-authority-graph.mjs'
+      - 'tests/security/usdh/read-live-usdh-rewarders.mjs'
       - '.github/workflows/usdh-authority-recon.yml'
   workflow_dispatch:
 
@@ -22,10 +23,14 @@ jobs:
       - run: npm ci
       - name: Reconstruct full live USDh authority and trader graph
         run: node tests/security/usdh/read-live-usdh-full-authority-graph.mjs
+      - name: Scan live USDh rewarders
+        run: node tests/security/usdh/read-live-usdh-rewarders.mjs
       - name: Upload authority evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: usdh-authority-recon
-          path: tests/security/evidence/live-usdh-full-authority-graph.json
+          path: |
+            tests/security/evidence/live-usdh-full-authority-graph.json
+            tests/security/evidence/live-usdh-rewarders.json
           if-no-files-found: warn
