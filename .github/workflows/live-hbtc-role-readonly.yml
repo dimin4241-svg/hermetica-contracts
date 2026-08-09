@@ -40,19 +40,14 @@ jobs:
             PRINCIPAL="$1" node --input-type=module <<'NODE'
           import { Cl, serializeCV } from '@stacks/transactions';
           const raw = serializeCV(Cl.principal(process.env.PRINCIPAL));
-          if (typeof raw === 'string') {
-            console.log(raw.startsWith('0x') ? raw : '0x' + raw);
-          } else {
-            console.log('0x' + Buffer.from(raw).toString('hex'));
-          }
+          if (typeof raw === 'string') console.log(raw.startsWith('0x') ? raw : '0x' + raw);
+          else console.log('0x' + Buffer.from(raw).toString('hex'));
           NODE
           }
 
           call_read() {
             local contract_name="$1" fn="$2" arg="$3"
-            curl --fail-with-body -sS \
-              -X POST \
-              -H 'content-type: application/json' \
+            curl --fail-with-body -sS -X POST -H 'content-type: application/json' \
               "https://api.hiro.so/v2/contracts/call-read/${DEPLOYER}/${contract_name}/${fn}" \
               --data "{\"sender\":\"${DEPLOYER}\",\"arguments\":[\"${arg}\"]}"
           }
@@ -70,10 +65,18 @@ jobs:
             RESULT="$(call_read "$STATE_NAME" get-external "$ARG" | jq -r '.result // .cause // .')"
             echo "${LABEL}=${RESULT} ${PRINCIPAL}"
           done <<'EOF'
+          zest_v0_0|SP1A27KFY4XERQCCRCARCYD1CC5N7M6688BSYADJ7.v0-0-market
+          zest_v0_1|SP1A27KFY4XERQCCRCARCYD1CC5N7M6688BSYADJ7.v0-1-market
+          zest_v0_2|SP1A27KFY4XERQCCRCARCYD1CC5N7M6688BSYADJ7.v0-2-market
           zest_v0_3|SP1A27KFY4XERQCCRCARCYD1CC5N7M6688BSYADJ7.v0-3-market
           zest_v0_4|SP1A27KFY4XERQCCRCARCYD1CC5N7M6688BSYADJ7.v0-4-market
           zest_vault_sbtc|SP1A27KFY4XERQCCRCARCYD1CC5N7M6688BSYADJ7.v0-vault-sbtc
           zest_vault_usdh|SP1A27KFY4XERQCCRCARCYD1CC5N7M6688BSYADJ7.v0-vault-usdh
+          staking_v1|SPN5AKG35QZSK2M8GAMR4AFX45659RJHDW353HSG.staking-v1
           staking_v1_1|SPN5AKG35QZSK2M8GAMR4AFX45659RJHDW353HSG.staking-v1-1
+          staking_silo_v1|SPN5AKG35QZSK2M8GAMR4AFX45659RJHDW353HSG.staking-silo-v1
           staking_silo_v1_1|SPN5AKG35QZSK2M8GAMR4AFX45659RJHDW353HSG.staking-silo-v1-1
+          minting_auto_v1|SPN5AKG35QZSK2M8GAMR4AFX45659RJHDW353HSG.minting-auto-v1
+          minting_auto_v1_1|SPN5AKG35QZSK2M8GAMR4AFX45659RJHDW353HSG.minting-auto-v1-1
+          minting_auto_v1_2|SPN5AKG35QZSK2M8GAMR4AFX45659RJHDW353HSG.minting-auto-v1-2
           EOF
