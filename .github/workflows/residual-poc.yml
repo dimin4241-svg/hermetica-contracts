@@ -1,0 +1,34 @@
+name: hBTC residual-supply PoC prep
+
+on:
+  push:
+    branches: [evidence/live-hbtc-role-readonly]
+    paths: [.github/workflows/residual-poc.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Inspect SDK and contract dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          echo '=== clarinet-sdk exports ==='
+          node --input-type=module -e "import * as m from '@stacks/clarinet-sdk'; console.log(Object.keys(m)); console.log(String(m.initSimnet).slice(0,2000));"
+          echo '=== initSimnet type declarations ==='
+          grep -R "initSimnet" node_modules/@stacks/clarinet-sdk -n | head -30 || true
+          echo '=== State HQ calls ==='
+          grep -oE "contract-call\? \.hq-hbtc [a-zA-Z0-9-]+" mainnet/contracts/hbtc/protocol/state-v1.clar | sort -u
+          echo '=== Token HQ/blacklist calls ==='
+          grep -oE "contract-call\? \.(hq-hbtc|blacklist) [a-zA-Z0-9-]+" mainnet/contracts/hbtc/tokens/token-hbtc.clar | sort -u
