@@ -1,0 +1,31 @@
+name: hBTC Role Recon
+
+on:
+  push:
+    branches:
+      - validation-usdh-jit-reward-poc
+    paths:
+      - 'tests/security/standalone/read-live-hbtc-all-roles.mjs'
+      - '.github/workflows/hbtc-role-recon.yml'
+  workflow_dispatch:
+
+jobs:
+  roles:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Reconstruct all live hBTC roles
+        run: node tests/security/standalone/read-live-hbtc-all-roles.mjs
+      - name: Upload role evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hbtc-role-recon
+          path: tests/security/evidence/live-hbtc-all-roles.json
+          if-no-files-found: warn
