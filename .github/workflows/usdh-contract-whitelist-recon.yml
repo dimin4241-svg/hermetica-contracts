@@ -1,0 +1,31 @@
+name: USDh Contract Whitelist Recon
+
+on:
+  push:
+    branches:
+      - validation-usdh-jit-reward-poc
+    paths:
+      - 'tests/security/usdh/read-live-usdh-contract-whitelists.mjs'
+      - '.github/workflows/usdh-contract-whitelist-recon.yml'
+  workflow_dispatch:
+
+jobs:
+  whitelist:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Scan live USDh contract principals in whitelists
+        run: node tests/security/usdh/read-live-usdh-contract-whitelists.mjs
+      - name: Upload whitelist evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: usdh-contract-whitelist-recon
+          path: tests/security/evidence/live-usdh-contract-whitelists.json
+          if-no-files-found: warn
