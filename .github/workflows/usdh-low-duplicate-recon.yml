@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - validation-susdh-donation-poc
+      - validation-usdh-jit-reward-poc
     paths:
       - 'tests/security/usdh/**'
       - 'tests/security/standalone/read-live-usdh-jit-reward-surface.mjs'
@@ -25,9 +26,8 @@ jobs:
       - name: Scan live USDh discrete reward surface
         run: node tests/security/standalone/read-live-usdh-jit-reward-surface.mjs
 
-      - name: Run JIT staking reward A/B PoC if present
-        if: ${{ hashFiles('tests/security/usdh/run-jit-reward-ab-poc.mjs') != '' }}
-        run: node tests/security/usdh/run-jit-reward-ab-poc.mjs
+      - name: Run JIT staking reward A/B PoC
+        run: node tests/security/usdh/run-jit-reward-ab-ci.mjs
 
       - name: Upload USDh evidence
         if: always()
