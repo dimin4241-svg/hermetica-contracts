@@ -1,4 +1,4 @@
-name: Live hBTC read-only configuration probe
+name: Live hBTC read-only role matrix
 
 on:
   push:
@@ -26,18 +26,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Query deployed configuration without state changes
+      - name: Query all deployed/prior hBTC principals against live HQ
         shell: bash
         run: |
           set -euo pipefail
 
           HBTC='SP1S1HSFH0SQQGWKB69EYFNY0B1MHRMGXR3J1FH4D'
-          USDH='SPN5AKG35QZSK2M8GAMR4AFX45659RJHDW353HSG'
           HQ_NAME='hq-v1'
-          STATE_NAME='state-hbtc-v1'
-          AUTO_STATE='minting-auto-state-v1'
-          TRADING="${HBTC}.trading-hbtc-v1"
-          HERMETICA_IF="${HBTC}.hermetica-interface-hbtc-v1"
 
           clarity_principal() {
             PRINCIPAL="$1" node --input-type=module <<'NODE'
@@ -48,68 +43,38 @@ jobs:
           NODE
           }
 
-          decode_cv() {
-            RESULT="$1" node --input-type=module <<'NODE'
-          import * as stacks from '@stacks/transactions';
-          const raw = process.env.RESULT;
-          try {
-            const cv = stacks.deserializeCV(raw);
-            if (typeof stacks.cvToJSON === 'function') console.log(JSON.stringify(stacks.cvToJSON(cv)));
-            else if (typeof stacks.cvToValue === 'function') console.log(JSON.stringify(stacks.cvToValue(cv)));
-            else console.log(JSON.stringify(cv));
-          } catch (e) {
-            console.log(JSON.stringify({decode_error:String(e), raw}));
-          }
-          NODE
-          }
-
-          call_read() {
-            local addr="$1" contract_name="$2" fn="$3" args_json="$4"
+          call_role() {
+            local fn="$1" arg="$2"
             curl --fail-with-body -sS -X POST -H 'content-type: application/json' \
-              "https://api.hiro.so/v2/contracts/call-read/${addr}/${contract_name}/${fn}" \
-              --data "{\"sender\":\"${addr}\",\"arguments\":${args_json}}"
+              "https://api.hiro.so/v2/contracts/call-read/${HBTC}/${HQ_NAME}/${fn}" \
+              --data "{\"sender\":\"${HBTC}\",\"arguments\":[\"${arg}\"]}" \
+              | jq -r '.result // .cause // .'
           }
 
-          echo '=== Trading live roles ==='
-          TARG="$(clarity_principal "$TRADING")"
-          for FN in get-trader get-manager get-rewarder get-protocol; do
-            RESULT="$(call_read "$HBTC" "$HQ_NAME" "$FN" "[\"${TARG}\"]" | jq -r '.result // .cause // .')"
-            echo "${FN}=${RESULT}"
-          done
-
-          echo '=== State live externals ==='
-          while IFS='|' read -r LABEL PRINCIPAL; do
+          printf '%-34s %-7s %-8s %-9s %-9s %-10s %-10s\n' contract trader manager rewarder protocol guardian fee_setter
+          while IFS='|' read -r LABEL NAME; do
+            PRINCIPAL="${HBTC}.${NAME}"
             ARG="$(clarity_principal "$PRINCIPAL")"
-            RESULT="$(call_read "$HBTC" "$STATE_NAME" get-external "[\"${ARG}\"]" | jq -r '.result // .cause // .')"
-            echo "${LABEL}=${RESULT} ${PRINCIPAL}"
+            TRADER="$(call_role get-trader "$ARG")"
+            MANAGER="$(call_role get-manager "$ARG")"
+            REWARDER="$(call_role get-rewarder "$ARG")"
+            PROTOCOL="$(call_role get-protocol "$ARG")"
+            GUARDIAN="$(call_role get-guardian "$ARG")"
+            FEESETTER="$(call_role get-fee-setter "$ARG")"
+            printf '%-34s %-7s %-8s %-9s %-9s %-10s %-10s\n' "$LABEL" "$TRADER" "$MANAGER" "$REWARDER" "$PROTOCOL" "$GUARDIAN" "$FEESETTER"
           done <<'EOF'
-          zest_v0_3|SP1A27KFY4XERQCCRCARCYD1CC5N7M6688BSYADJ7.v0-3-market
-          zest_v0_4|SP1A27KFY4XERQCCRCARCYD1CC5N7M6688BSYADJ7.v0-4-market
-          staking_v1|SPN5AKG35QZSK2M8GAMR4AFX45659RJHDW353HSG.staking-v1
-          staking_v1_1|SPN5AKG35QZSK2M8GAMR4AFX45659RJHDW353HSG.staking-v1-1
-          minting_auto_v1_1|SPN5AKG35QZSK2M8GAMR4AFX45659RJHDW353HSG.minting-auto-v1-1
-          minting_auto_v1_2|SPN5AKG35QZSK2M8GAMR4AFX45659RJHDW353HSG.minting-auto-v1-2
-          EOF
-
-          echo '=== Live minting-auto-state for hBTC Hermetica Interface ==='
-          CALLER_ARG="$(clarity_principal "$HERMETICA_IF")"
-          while IFS='|' read -r LABEL ASSET; do
-            ASSET_ARG="$(clarity_principal "$ASSET")"
-
-            SUP_RAW="$(call_read "$USDH" "$AUTO_STATE" get-supported-asset "[\"${ASSET_ARG}\"]" | jq -r '.result // empty')"
-            WL_RAW="$(call_read "$USDH" "$AUTO_STATE" get-whitelist "[\"${CALLER_ARG}\",\"${ASSET_ARG}\"]" | jq -r '.result // empty')"
-            HBTC_ASSET_RAW="$(call_read "$HBTC" "$STATE_NAME" get-asset "[\"${ASSET_ARG}\"]" | jq -r '.result // empty')"
-
-            echo "--- ${LABEL} ${ASSET} ---"
-            echo "minting_supported_raw=${SUP_RAW:-NONE}"
-            [ -n "$SUP_RAW" ] && echo "minting_supported_decoded=$(decode_cv "$SUP_RAW")"
-            echo "hbtc_whitelist_raw=${WL_RAW:-NONE}"
-            [ -n "$WL_RAW" ] && echo "hbtc_whitelist_decoded=$(decode_cv "$WL_RAW")"
-            echo "hbtc_asset_raw=${HBTC_ASSET_RAW:-NONE}"
-            [ -n "$HBTC_ASSET_RAW" ] && echo "hbtc_asset_decoded=$(decode_cv "$HBTC_ASSET_RAW")"
-          done <<'EOF'
-          sbtc|SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token
-          usdh|SPN5AKG35QZSK2M8GAMR4AFX45659RJHDW353HSG.usdh-token-v1
-          susdh|SPN5AKG35QZSK2M8GAMR4AFX45659RJHDW353HSG.susdh-token-v1
-          usdcx|SP120SBRBQJ00MCWS7TM5R8WJNTTKD5K0HFRC2CNE.usdcx
+          state|state-hbtc-v1
+          blacklist|blacklist-v1
+          vault_v1|vault-hbtc-v1
+          vault_v1_1|vault-hbtc-v1-1
+          vault_v1_2|vault-hbtc-v1-2
+          token|token-hbtc
+          reserve|reserve-hbtc-v1
+          trading|trading-hbtc-v1
+          zest_interface|zest-interface-hbtc-v1
+          hermetica_interface|hermetica-interface-hbtc-v1
+          controller|controller-hbtc-v1
+          reserve_fund|reserve-fund-hbtc-v1
+          fee_collector_hbtc|fee-collector-hbtc-v1
+          fee_collector|fee-collector-v1
           EOF
