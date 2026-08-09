@@ -41,10 +41,11 @@ jobs:
             const src=await req(`https://api.hiro.so/v2/contracts/source/${O}/${name}?proof=0`);
             console.log(`CONTRACT_${name}=${src.status}`);
             if(!src.ok) continue;
-            const arg='0x'+Buffer.from(serializeCV(Cl.principal(principal))).toString('hex');
+            const arg='0x'+serializeCV(Cl.principal(principal));
             const rr=await req(`https://api.hiro.so/v2/contracts/call-read/${O}/hq-v1/get-protocol`,{
               method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({sender:O,arguments:[arg]})
             });
-            console.log(`PROTOCOL_${name}=${JSON.stringify(await rr.json())}`);
+            const text=await rr.text();
+            console.log(`PROTOCOL_${name}=HTTP${rr.status}:${text}`);
           }
           NODE
