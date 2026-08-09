@@ -1,0 +1,93 @@
+name: Live Zest eGroup transition audit
+
+on:
+  push:
+    branches:
+      - evidence/live-hbtc-role-readonly
+    paths:
+      - .github/workflows/live-zest-egroup-audit.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Read live eGroups and enumerate upward dust transitions
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { Cl, serializeCV, deserializeCV } from '@stacks/transactions';
+          const E='SP1A27KFY4XERQCCRCARCYD1CC5N7M6688BSYADJ7.v0-egroup';
+          const SENDER='SP1A27KFY4XERQCCRCARCYD1CC5N7M6688BSYADJ7';
+          const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+          async function req(url,opts={}){
+            for(let i=0;i<10;i++){
+              const r=await fetch(url,{...opts,headers:{accept:'application/json',...(opts.headers||{})}});
+              if(r.status===429){await sleep(1000+i*700);continue;}
+              if(!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+              return await r.json();
+            }
+            throw new Error('rate limit');
+          }
+          function arg(cv){const x=serializeCV(cv);return typeof x==='string'?(x.startsWith('0x')?x:'0x'+x):'0x'+Buffer.from(x).toString('hex');}
+          async function ro(fn,args=[]){
+            const [addr,name]=E.split('.');
+            const j=await req(`https://api.hiro.so/v2/contracts/call-read/${addr}/${name}/${fn}`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({sender:SENDER,arguments:args.map(arg)})});
+            if(!j.okay) throw new Error(`${fn}: ${JSON.stringify(j)}`);
+            return deserializeCV(j.result);
+          }
+          const unwrapResp=cv=>cv.type==='ok'?cv.value:cv;
+          const asUint=cv=>BigInt(unwrapResp(cv).value);
+          const cvNum=x=>BigInt(x.value);
+          const bufNum=x=>BigInt('0x'+Buffer.from(x.value).toString('hex'));
+          const nonce=Number(asUint(await ro('get-nonce')));
+          console.log(`NONCE=${nonce}`);
+          const groups=[];
+          for(let i=0;i<nonce;i++){
+            const cv=await ro('lookup',[Cl.uint(i)]);
+            const t=unwrapResp(cv).value;
+            const g={id:i,mask:cvNum(t.MASK),borrow:Number(bufNum(t['LTV-BORROW'])),partial:Number(bufNum(t['LTV-LIQ-PARTIAL'])),full:Number(bufNum(t['LTV-LIQ-FULL']))};
+            groups.push(g); console.log('GROUP='+JSON.stringify({...g,mask:g.mask.toString()}));
+          }
+          const pop=x=>{let n=0n;while(x){x&=x-1n;n++;}return Number(n)};
+          function resolve(target){
+            const matches=groups.filter(g=>(target & g.mask)===target);
+            if(!matches.length)return null;
+            const minPop=Math.min(...matches.map(g=>pop(g.mask)));
+            return matches.filter(g=>pop(g.mask)===minPop).sort((a,b)=>a.id-b.id)[0];
+          }
+          const MAXBIT=128;
+          let ups=0;
+          // Enumerate every submask that can be represented by at least one group, then add one absent bit.
+          // For tractability use submasks formed by removing up to 3 bits from registered masks; these cover realistic debt/collateral position masks.
+          const targets=new Set();
+          for(const g of groups){
+            targets.add(g.mask.toString());
+            const bits=[];for(let b=0;b<MAXBIT;b++)if((g.mask&(1n<<BigInt(b)))!==0n)bits.push(b);
+            for(const a of bits)targets.add((g.mask&~(1n<<BigInt(a))).toString());
+            for(let x=0;x<bits.length;x++)for(let y=x+1;y<bits.length;y++)targets.add((g.mask&~(1n<<BigInt(bits[x]))&~(1n<<BigInt(bits[y]))).toString());
+          }
+          for(const s of targets){
+            const t=BigInt(s); if(t===0n)continue;
+            const before=resolve(t); if(!before)continue;
+            for(let b=0;b<MAXBIT;b++){
+              const bit=1n<<BigInt(b); if(t&bit)continue;
+              const after=resolve(t|bit); if(!after)continue;
+              if(after.borrow>before.borrow){
+                ups++; console.log('UPWARD='+JSON.stringify({target:t.toString(),addBit:b,before:{id:before.id,ltv:before.borrow,mask:before.mask.toString()},after:{id:after.id,ltv:after.borrow,mask:after.mask.toString()}}));
+              }
+            }
+          }
+          console.log(`UPWARD_COUNT=${ups}`);
+          NODE
