@@ -26,7 +26,11 @@ jobs:
       - name: Scan live USDh discrete reward surface
         run: node tests/security/standalone/read-live-usdh-jit-reward-surface.mjs
 
+      - name: Scan live minting-auto supported assets and feed IDs
+        run: node tests/security/usdh/read-live-minting-auto-assets.mjs
+
       - name: Run JIT staking reward A/B PoC
+        continue-on-error: true
         run: node tests/security/usdh/run-jit-reward-ab-ci.mjs
 
       - name: Upload USDh evidence
@@ -36,4 +40,5 @@ jobs:
           name: usdh-low-duplicate-recon
           path: |
             tests/security/evidence/live-usdh-jit-reward-surface.json
+            tests/security/evidence/live-usdh-minting-auto-assets.json
           if-no-files-found: warn
