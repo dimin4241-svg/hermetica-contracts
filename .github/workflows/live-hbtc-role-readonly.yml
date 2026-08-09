@@ -1,4 +1,4 @@
-name: Live USDh FLH invariant probe
+name: Live USDh staking custom-cooldown probe
 
 on:
   push:
@@ -15,18 +15,38 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      HIRO_API_KEY: ${{ secrets.HIRO_API_KEY }}
     steps:
       - uses: actions/checkout@v4
-      - name: Fetch immutable FLH source and print execution/callback body
+      - name: Enumerate staking-state custom cooldown events
         shell: bash
         run: |
           set -euo pipefail
-          curl --fail-with-body -sS \
-            'https://api.hiro.so/v2/contracts/source/SP1A27KFY4XERQCCRCARCYD1CC5N7M6688BSYADJ7/flh?proof=0' \
-            | jq -r '.source' > /tmp/flh.clar
-          echo '=== FLH lines 100-245 ==='
-          nl -ba /tmp/flh.clar | sed -n '100,245p'
-          echo '=== all external calls ==='
-          grep -n 'contract-call?' /tmp/flh.clar || true
-          echo '=== maps/data vars ==='
-          grep -nE '^\(define-(data-var|map|constant)' /tmp/flh.clar || true
+          node --input-type=module <<'NODE'
+          const C='SPN5AKG35QZSK2M8GAMR4AFX45659RJHDW353HSG.staking-state-v1';
+          const KEY=process.env.HIRO_API_KEY||'';
+          const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+          async function getJson(url){
+            for(let i=0;i<10;i++){
+              const h={accept:'application/json'}; if(KEY) h['x-api-key']=KEY;
+              const r=await fetch(url,{headers:h});
+              if(r.status===429){await sleep(1200+i*1000);continue;}
+              if(!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+              return await r.json();
+            }
+            throw new Error('rate limit');
+          }
+          const events=[];
+          for(let offset=0;offset<1000;offset+=50){
+            const p=await getJson(`https://api.hiro.so/extended/v1/contract/${C}/events?limit=50&offset=${offset}`);
+            const rows=p.results??[];
+            for(const e of rows){
+              const repr=e?.contract_log?.value?.repr??'';
+              if(repr.includes('set-custom-cooldown')) events.push({tx_id:e.tx_id,repr});
+            }
+            if(rows.length<50) break;
+          }
+          console.log(`CUSTOM_EVENTS=${events.length}`);
+          for(const e of events) console.log('CUSTOM_EVENT='+JSON.stringify(e));
+          NODE
