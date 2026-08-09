@@ -1,4 +1,4 @@
-name: Live hBTC deployed-source semantic diff probe
+name: Live hBTC deployed-core semantic diff probe
 
 on:
   push:
@@ -18,30 +18,52 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Normalize deployment aliases and compare v1-2 logic
+      - name: Compare immutable deployed core/interface logic with master
         shell: bash
         run: |
           set -euo pipefail
-          URL='https://api.hiro.so/v2/contracts/source/SP1S1HSFH0SQQGWKB69EYFNY0B1MHRMGXR3J1FH4D/vault-hbtc-v1-2?proof=0'
-          curl --fail-with-body -sS "$URL" -o /tmp/deployed.json
-          jq -r '.source' /tmp/deployed.json > /tmp/deployed.clar
+          HBTC='SP1S1HSFH0SQQGWKB69EYFNY0B1MHRMGXR3J1FH4D'
+          mkdir -p /tmp/hbtc-diff
 
-          cp /tmp/deployed.clar /tmp/normalized.clar
-          sed -i \
-            -e 's/\.reserve-hbtc-v1/\.reserve/g' \
-            -e 's/\.fee-collector-hbtc-v1/\.fee-collector/g' \
-            -e 's/\.state-hbtc-v1/\.state/g' \
-            -e 's/\.blacklist-v1/\.blacklist/g' \
-            -e 's/\.hq-v1/\.hq-hbtc/g' \
-            /tmp/normalized.clar
+          normalize() {
+            local src="$1" dst="$2"
+            cp "$src" "$dst"
+            sed -i \
+              -e 's/\.reserve-hbtc-v1/\.reserve/g' \
+              -e 's/\.reserve-fund-hbtc-v1/\.reserve-fund/g' \
+              -e 's/\.fee-collector-hbtc-v1/\.fee-collector/g' \
+              -e 's/\.state-hbtc-v1/\.state/g' \
+              -e 's/\.blacklist-v1/\.blacklist/g' \
+              -e 's/\.hq-v1/\.hq-hbtc/g' \
+              -e 's/\.controller-hbtc-v1/\.controller-hbtc/g' \
+              -e 's/\.zest-interface-hbtc-v1/\.zest-interface/g' \
+              -e 's/\.hermetica-interface-hbtc-v1/\.hermetica-interface/g' \
+              -e 's/\.trading-hbtc-v1/\.trading/g' \
+              "$dst"
+          }
 
-          echo "deployed_sha256=$(sha256sum /tmp/deployed.clar | cut -d' ' -f1)"
-          echo "normalized_sha256=$(sha256sum /tmp/normalized.clar | cut -d' ' -f1)"
-          echo "master_sha256=$(sha256sum mainnet/contracts/hbtc/protocol/vault-v1-2.clar | cut -d' ' -f1)"
+          compare_one() {
+            local live="$1" path="$2"
+            local raw="/tmp/hbtc-diff/${live}.raw.clar"
+            local norm="/tmp/hbtc-diff/${live}.norm.clar"
+            curl --fail-with-body -sS \
+              "https://api.hiro.so/v2/contracts/source/${HBTC}/${live}?proof=0" \
+              | jq -r '.source' > "$raw"
+            normalize "$raw" "$norm"
+            if cmp -s "$norm" "$path"; then
+              echo "RESULT|${live}|BYTE_EXACT_AFTER_ALIAS_NORMALIZATION"
+            else
+              echo "RESULT|${live}|DIFFERENT"
+              echo "--- DIFF ${live} -> ${path} ---"
+              diff -u "$norm" "$path" || true
+              echo "--- END DIFF ${live} ---"
+            fi
+          }
 
-          if cmp -s /tmp/normalized.clar mainnet/contracts/hbtc/protocol/vault-v1-2.clar; then
-            echo 'NORMALIZED_DEPLOYED_VS_MASTER=BYTE_EXACT'
-          else
-            echo 'NORMALIZED_DEPLOYED_VS_MASTER=DIFFERENT'
-            diff -u /tmp/normalized.clar mainnet/contracts/hbtc/protocol/vault-v1-2.clar || true
-          fi
+          compare_one state-hbtc-v1 mainnet/contracts/hbtc/protocol/state-v1.clar
+          compare_one trading-hbtc-v1 mainnet/contracts/hbtc/protocol/trading-v1.clar
+          compare_one zest-interface-hbtc-v1 mainnet/contracts/hbtc/protocol/interfaces/zest-interface-v1.clar
+          compare_one hermetica-interface-hbtc-v1 mainnet/contracts/hbtc/protocol/interfaces/hermetica-interface-v1.clar
+          compare_one controller-hbtc-v1 mainnet/contracts/hbtc/protocol/controller-v1.clar
+          compare_one reserve-hbtc-v1 mainnet/contracts/hbtc/protocol/reserve-v1.clar
+          compare_one reserve-fund-hbtc-v1 mainnet/contracts/hbtc/protocol/reserve-fund-v1.clar
