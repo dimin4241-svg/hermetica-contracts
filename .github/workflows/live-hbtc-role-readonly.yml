@@ -23,7 +23,5 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Generate Clarigen types
-        run: npm run clarigen
-      - name: Run express boundary PoC
+      - name: Run standalone express boundary PoC
         run: npx vitest run tests/hbtc/express-boundary-poc.test.ts --reporter=verbose
