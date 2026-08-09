@@ -1,4 +1,4 @@
-name: Live hBTC read-only role matrix
+name: Live hBTC migration balance probe
 
 on:
   push:
@@ -26,13 +26,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Query all deployed/prior hBTC principals against live HQ
+      - name: Query old/current vault token balances and claim counter
         shell: bash
         run: |
           set -euo pipefail
 
           HBTC='SP1S1HSFH0SQQGWKB69EYFNY0B1MHRMGXR3J1FH4D'
-          HQ_NAME='hq-v1'
+          SBTC='SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4'
 
           clarity_principal() {
             PRINCIPAL="$1" node --input-type=module <<'NODE'
@@ -43,38 +43,45 @@ jobs:
           NODE
           }
 
-          call_role() {
-            local fn="$1" arg="$2"
+          decode_cv() {
+            RESULT="$1" node --input-type=module <<'NODE'
+          import * as stacks from '@stacks/transactions';
+          const raw = process.env.RESULT;
+          try {
+            const cv = stacks.deserializeCV(raw);
+            if (typeof stacks.cvToJSON === 'function') console.log(JSON.stringify(stacks.cvToJSON(cv)));
+            else if (typeof stacks.cvToValue === 'function') console.log(JSON.stringify(stacks.cvToValue(cv)));
+            else console.log(JSON.stringify(cv));
+          } catch (e) { console.log(JSON.stringify({decode_error:String(e), raw})); }
+          NODE
+          }
+
+          call_read() {
+            local addr="$1" name="$2" fn="$3" args_json="$4"
             curl --fail-with-body -sS -X POST -H 'content-type: application/json' \
-              "https://api.hiro.so/v2/contracts/call-read/${HBTC}/${HQ_NAME}/${fn}" \
-              --data "{\"sender\":\"${HBTC}\",\"arguments\":[\"${arg}\"]}" \
+              "https://api.hiro.so/v2/contracts/call-read/${addr}/${name}/${fn}" \
+              --data "{\"sender\":\"${HBTC}\",\"arguments\":${args_json}}" \
               | jq -r '.result // .cause // .'
           }
 
-          printf '%-34s %-7s %-8s %-9s %-9s %-10s %-10s\n' contract trader manager rewarder protocol guardian fee_setter
+          CLAIM_RAW="$(call_read "$HBTC" state-hbtc-v1 get-claim-id '[]')"
+          echo "global_claim_id_raw=$CLAIM_RAW"
+          echo "global_claim_id_decoded=$(decode_cv "$CLAIM_RAW")"
+
+          echo '=== vault balances ==='
           while IFS='|' read -r LABEL NAME; do
             PRINCIPAL="${HBTC}.${NAME}"
             ARG="$(clarity_principal "$PRINCIPAL")"
-            TRADER="$(call_role get-trader "$ARG")"
-            MANAGER="$(call_role get-manager "$ARG")"
-            REWARDER="$(call_role get-rewarder "$ARG")"
-            PROTOCOL="$(call_role get-protocol "$ARG")"
-            GUARDIAN="$(call_role get-guardian "$ARG")"
-            FEESETTER="$(call_role get-fee-setter "$ARG")"
-            printf '%-34s %-7s %-8s %-9s %-9s %-10s %-10s\n' "$LABEL" "$TRADER" "$MANAGER" "$REWARDER" "$PROTOCOL" "$GUARDIAN" "$FEESETTER"
+            HRAW="$(call_read "$HBTC" token-hbtc get-balance "[\"${ARG}\"]")"
+            SRAW="$(call_read "$SBTC" sbtc-token get-balance "[\"${ARG}\"]")"
+            echo "${LABEL}=${PRINCIPAL}"
+            echo "  hbtc_raw=$HRAW"
+            echo "  hbtc_decoded=$(decode_cv "$HRAW")"
+            echo "  sbtc_raw=$SRAW"
+            echo "  sbtc_decoded=$(decode_cv "$SRAW")"
+            sleep 0.3
           done <<'EOF'
-          state|state-hbtc-v1
-          blacklist|blacklist-v1
           vault_v1|vault-hbtc-v1
           vault_v1_1|vault-hbtc-v1-1
           vault_v1_2|vault-hbtc-v1-2
-          token|token-hbtc
-          reserve|reserve-hbtc-v1
-          trading|trading-hbtc-v1
-          zest_interface|zest-interface-hbtc-v1
-          hermetica_interface|hermetica-interface-hbtc-v1
-          controller|controller-hbtc-v1
-          reserve_fund|reserve-fund-hbtc-v1
-          fee_collector_hbtc|fee-collector-hbtc-v1
-          fee_collector|fee-collector-v1
           EOF
