@@ -1,0 +1,20 @@
+name: hBTC Granite Status
+on:
+  push:
+    branches: [validation-usdh-jit-reward-poc]
+    paths:
+      - 'tests/security/standalone/read-live-hbtc-granite-status.mjs'
+      - '.github/workflows/hbtc-granite-status.yml'
+  workflow_dispatch:
+jobs:
+  status:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: node tests/security/standalone/read-live-hbtc-granite-status.mjs
