@@ -17,14 +17,14 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           cache: npm
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Run paused permissionless force-funding A/B proof
-        run: npx vitest run tests/security/pause-force-fund/paused-force-funding-freeze.test.ts --reporter=verbose
+      - name: Run standalone paused permissionless force-funding A/B proof
+        run: node tests/security/pause-force-fund/run-paused-force-funding-freeze-poc.mjs
 
       - name: Scan live hBTC redemption pause history
         run: node tests/security/standalone/read-live-hbtc-redeem-pause-history.mjs
