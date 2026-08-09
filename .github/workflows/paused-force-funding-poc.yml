@@ -9,7 +9,7 @@ on:
 jobs:
   poc:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Checkout validation branch
         uses: actions/checkout@v4
@@ -25,3 +25,14 @@ jobs:
 
       - name: Run paused permissionless force-funding A/B proof
         run: npx vitest run tests/security/pause-force-fund/paused-force-funding-freeze.test.ts --reporter=verbose
+
+      - name: Scan live hBTC redemption pause history
+        run: node tests/security/standalone/read-live-hbtc-redeem-pause-history.mjs
+
+      - name: Upload live redemption pause evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-hbtc-redeem-pause-history
+          path: tests/security/evidence/live-hbtc-redeem-pause-history.json
+          if-no-files-found: error
