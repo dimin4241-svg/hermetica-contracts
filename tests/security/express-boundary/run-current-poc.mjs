@@ -7,8 +7,8 @@ import { Cl, cvToString } from '@stacks/transactions';
 const simnet = await initSimnet('tests/security/pause-force-fund/Clarinet.toml');
 const accounts = simnet.getAccounts();
 const deployer = accounts.get('deployer');
-const user1 = accounts.get('wallet_6');
-const user2 = accounts.get('wallet_7');
+const user1 = accounts.get('wallet_2');
+const user2 = accounts.get('wallet_3');
 if (!deployer || !user1 || !user2) throw new Error('missing accounts');
 
 const BASE = 100_000_000n;
