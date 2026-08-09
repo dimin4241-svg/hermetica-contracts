@@ -14,7 +14,7 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 7
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -22,7 +22,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Read current claim and reserve state only
+      - name: Read current claim and funding history only
         shell: bash
         run: |
           set -euo pipefail
@@ -66,4 +66,26 @@ jobs:
           console.log(`CLAIM_116=${claim}`);
           console.log(`RESERVE_SBTC=${reserveBal}`);
           console.log(`REDEEM_ENABLED=${redeemEnabled}`);
+
+          let processCount=0, nonManagerCount=0, managerCount=0, batchCount=0;
+          outer: for(let offset=0;offset<500;offset+=50){
+            const page=await req(`https://api.hiro.so/extended/v1/contract/${V}/events?limit=50&offset=${offset}`);
+            for(const e of page.results??[]){
+              const repr=e?.contract_log?.value?.repr??'';
+              if(!repr.includes('(action "process-claim")')) continue;
+              processCount++;
+              if(repr.includes('(manager (some false))')){
+                nonManagerCount++;
+                console.log('NON_MANAGER_PROCESS='+JSON.stringify({tx_id:e.tx_id,repr}));
+              } else if(repr.includes('(manager (some true))')){
+                managerCount++;
+              } else if(repr.includes('(manager none)')){
+                batchCount++;
+              }
+              if(processCount>=80) break outer;
+            }
+            if((page.results??[]).length<50) break;
+            await sleep(250);
+          }
+          console.log(`PROCESS_COUNTS total=${processCount} non_manager=${nonManagerCount} manager=${managerCount} batch_none=${batchCount}`);
           NODE
