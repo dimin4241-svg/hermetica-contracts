@@ -1,4 +1,4 @@
-name: Live hBTC migration balance probe
+name: Live hBTC claim custody invariant probe
 
 on:
   push:
@@ -26,62 +26,113 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Query old/current vault token balances and claim counter
+      - name: Enumerate live v1-2 claims and reconcile escrow balances
         shell: bash
         run: |
           set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { Cl, serializeCV, deserializeCV, cvToJSON } from '@stacks/transactions';
 
-          HBTC='SP1S1HSFH0SQQGWKB69EYFNY0B1MHRMGXR3J1FH4D'
-          SBTC='SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4'
+          const HBTC = 'SP1S1HSFH0SQQGWKB69EYFNY0B1MHRMGXR3J1FH4D';
+          const SBTC = 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4';
+          const VAULT = `${HBTC}.vault-hbtc-v1-2`;
 
-          clarity_principal() {
-            PRINCIPAL="$1" node --input-type=module <<'NODE'
-          import { Cl, serializeCV } from '@stacks/transactions';
-          const raw = serializeCV(Cl.principal(process.env.PRINCIPAL));
-          if (typeof raw === 'string') console.log(raw.startsWith('0x') ? raw : '0x' + raw);
-          else console.log('0x' + Buffer.from(raw).toString('hex'));
+          const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+          function hex(cv) {
+            const raw = serializeCV(cv);
+            if (typeof raw === 'string') return raw.startsWith('0x') ? raw : `0x${raw}`;
+            return `0x${Buffer.from(raw).toString('hex')}`;
+          }
+
+          async function read(addr, name, fn, args = []) {
+            const url = `https://api.hiro.so/v2/contracts/call-read/${addr}/${name}/${fn}`;
+            const body = JSON.stringify({ sender: HBTC, arguments: args.map(hex) });
+            for (let attempt = 0; attempt < 8; attempt++) {
+              const r = await fetch(url, {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body,
+              });
+              if (r.status === 429) {
+                await sleep(700 + attempt * 500);
+                continue;
+              }
+              if (!r.ok) throw new Error(`${fn}: HTTP ${r.status} ${await r.text()}`);
+              const j = await r.json();
+              if (!j.result) throw new Error(`${fn}: ${JSON.stringify(j)}`);
+              return cvToJSON(deserializeCV(j.result));
+            }
+            throw new Error(`${fn}: rate limit retries exhausted`);
+          }
+
+          function uintValue(j) {
+            if (j.success === true) return BigInt(j.value.value);
+            return BigInt(j.value);
+          }
+
+          const claimCounter = await read(HBTC, 'state-hbtc-v1', 'get-claim-id');
+          const maxId = Number(uintValue(claimCounter));
+          console.log(`global_claim_id=${maxId}`);
+
+          const principalArg = Cl.principal(VAULT);
+          const hbtcBalJ = await read(HBTC, 'token-hbtc', 'get-balance', [principalArg]);
+          const sbtcBalJ = await read(SBTC, 'sbtc-token', 'get-balance', [principalArg]);
+          const hbtcBalance = uintValue(hbtcBalJ);
+          const sbtcBalance = uintValue(sbtcBalJ);
+          console.log(`vault_hbtc_balance=${hbtcBalance}`);
+          console.log(`vault_sbtc_balance=${sbtcBalance}`);
+
+          let unfundedShares = 0n;
+          let fundedAssets = 0n;
+          let unfundedCount = 0;
+          let fundedCount = 0;
+          const outstanding = [];
+
+          for (let id = 1; id <= maxId; id++) {
+            const j = await read(HBTC, 'vault-hbtc-v1-2', 'get-claim', [Cl.uint(id)]);
+            if (j.success !== true) {
+              await sleep(120);
+              continue;
+            }
+
+            const t = j.value.value;
+            const shares = BigInt(t.shares.value);
+            const user = t.user.value;
+            const express = t['is-express'].value;
+            const ts = BigInt(t.ts.value);
+            const assetsNode = t.assets.value;
+            const funded = assetsNode !== null;
+            const assets = funded ? BigInt(assetsNode.value) : null;
+
+            if (funded) {
+              fundedCount++;
+              fundedAssets += assets;
+            } else {
+              unfundedCount++;
+              unfundedShares += shares;
+            }
+            outstanding.push({ id, user, shares: shares.toString(), funded, assets: assets?.toString() ?? null, express, ts: ts.toString() });
+            await sleep(120);
+          }
+
+          console.log(`outstanding_claims=${outstanding.length}`);
+          console.log(`unfunded_count=${unfundedCount}`);
+          console.log(`funded_count=${fundedCount}`);
+          console.log(`sum_unfunded_shares=${unfundedShares}`);
+          console.log(`sum_funded_assets=${fundedAssets}`);
+          console.log(`hbtc_escrow_delta=${hbtcBalance - unfundedShares}`);
+          console.log(`sbtc_escrow_delta=${sbtcBalance - fundedAssets}`);
+          console.log('claims_json=' + JSON.stringify(outstanding));
+
+          if (hbtcBalance !== unfundedShares) {
+            console.log('INVARIANT_HBTC_ESCROW=MISMATCH');
+          } else {
+            console.log('INVARIANT_HBTC_ESCROW=EXACT');
+          }
+          if (sbtcBalance !== fundedAssets) {
+            console.log('INVARIANT_SBTC_ESCROW=MISMATCH');
+          } else {
+            console.log('INVARIANT_SBTC_ESCROW=EXACT');
+          }
           NODE
-          }
-
-          decode_cv() {
-            RESULT="$1" node --input-type=module <<'NODE'
-          import * as stacks from '@stacks/transactions';
-          const raw = process.env.RESULT;
-          try {
-            const cv = stacks.deserializeCV(raw);
-            if (typeof stacks.cvToJSON === 'function') console.log(JSON.stringify(stacks.cvToJSON(cv)));
-            else if (typeof stacks.cvToValue === 'function') console.log(JSON.stringify(stacks.cvToValue(cv)));
-            else console.log(JSON.stringify(cv));
-          } catch (e) { console.log(JSON.stringify({decode_error:String(e), raw})); }
-          NODE
-          }
-
-          call_read() {
-            local addr="$1" name="$2" fn="$3" args_json="$4"
-            curl --fail-with-body -sS -X POST -H 'content-type: application/json' \
-              "https://api.hiro.so/v2/contracts/call-read/${addr}/${name}/${fn}" \
-              --data "{\"sender\":\"${HBTC}\",\"arguments\":${args_json}}" \
-              | jq -r '.result // .cause // .'
-          }
-
-          CLAIM_RAW="$(call_read "$HBTC" state-hbtc-v1 get-claim-id '[]')"
-          echo "global_claim_id_raw=$CLAIM_RAW"
-          echo "global_claim_id_decoded=$(decode_cv "$CLAIM_RAW")"
-
-          echo '=== vault balances ==='
-          while IFS='|' read -r LABEL NAME; do
-            PRINCIPAL="${HBTC}.${NAME}"
-            ARG="$(clarity_principal "$PRINCIPAL")"
-            HRAW="$(call_read "$HBTC" token-hbtc get-balance "[\"${ARG}\"]")"
-            SRAW="$(call_read "$SBTC" sbtc-token get-balance "[\"${ARG}\"]")"
-            echo "${LABEL}=${PRINCIPAL}"
-            echo "  hbtc_raw=$HRAW"
-            echo "  hbtc_decoded=$(decode_cv "$HRAW")"
-            echo "  sbtc_raw=$SRAW"
-            echo "  sbtc_decoded=$(decode_cv "$SRAW")"
-            sleep 0.3
-          done <<'EOF'
-          vault_v1|vault-hbtc-v1
-          vault_v1_1|vault-hbtc-v1-1
-          vault_v1_2|vault-hbtc-v1-2
-          EOF
