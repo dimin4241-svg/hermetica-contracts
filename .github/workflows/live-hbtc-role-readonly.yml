@@ -1,4 +1,4 @@
-name: Live hBTC deployed-core semantic diff probe
+name: Live hBTC external-integration semantic diff probe
 
 on:
   push:
@@ -18,36 +18,38 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Compare immutable deployed core/interface logic with master
+      - name: Compare live USDh contracts used by hBTC with repository source
         shell: bash
         run: |
           set -euo pipefail
-          HBTC='SP1S1HSFH0SQQGWKB69EYFNY0B1MHRMGXR3J1FH4D'
-          mkdir -p /tmp/hbtc-diff
+          USDH='SPN5AKG35QZSK2M8GAMR4AFX45659RJHDW353HSG'
+          mkdir -p /tmp/usdh-diff
 
           normalize() {
             local src="$1" dst="$2"
             cp "$src" "$dst"
             sed -i \
-              -e 's/\.reserve-hbtc-v1/\.reserve/g' \
-              -e 's/\.reserve-fund-hbtc-v1/\.reserve-fund/g' \
-              -e 's/\.fee-collector-hbtc-v1/\.fee-collector/g' \
-              -e 's/\.state-hbtc-v1/\.state/g' \
-              -e 's/\.blacklist-v1/\.blacklist/g' \
-              -e 's/\.hq-v1/\.hq-hbtc/g' \
-              -e 's/\.controller-hbtc-v1/\.controller-hbtc/g' \
-              -e 's/\.zest-interface-hbtc-v1/\.zest-interface/g' \
-              -e 's/\.hermetica-interface-hbtc-v1/\.hermetica-interface/g' \
-              -e 's/\.trading-hbtc-v1/\.trading/g' \
+              -e 's/\.minting-auto-state-v1/\.minting-auto-state/g' \
+              -e 's/\.minting-state-v1/\.minting-state/g' \
+              -e 's/\.minting-auto-v1-2/\.minting-auto/g' \
+              -e 's/\.redeeming-reserve-v1-2/\.redeeming-reserve/g' \
+              -e 's/\.staking-state-v1/\.staking-state/g' \
+              -e 's/\.staking-reserve-v1/\.staking-reserve/g' \
+              -e 's/\.staking-silo-v1-1/\.staking-silo/g' \
+              -e 's/\.staking-v1-1/\.staking/g' \
+              -e 's/\.usdh-token-v1/\.usdh-token/g' \
+              -e 's/\.susdh-token-v1/\.susdh-token/g' \
+              -e 's/\.blacklist-susdh-v1/\.blacklist-susdh/g' \
+              -e 's/\.hq-v1/\.hq/g' \
               "$dst"
           }
 
           compare_one() {
             local live="$1" path="$2"
-            local raw="/tmp/hbtc-diff/${live}.raw.clar"
-            local norm="/tmp/hbtc-diff/${live}.norm.clar"
+            local raw="/tmp/usdh-diff/${live}.raw.clar"
+            local norm="/tmp/usdh-diff/${live}.norm.clar"
             curl --fail-with-body -sS \
-              "https://api.hiro.so/v2/contracts/source/${HBTC}/${live}?proof=0" \
+              "https://api.hiro.so/v2/contracts/source/${USDH}/${live}?proof=0" \
               | jq -r '.source' > "$raw"
             normalize "$raw" "$norm"
             if cmp -s "$norm" "$path"; then
@@ -60,10 +62,7 @@ jobs:
             fi
           }
 
-          compare_one state-hbtc-v1 mainnet/contracts/hbtc/protocol/state-v1.clar
-          compare_one trading-hbtc-v1 mainnet/contracts/hbtc/protocol/trading-v1.clar
-          compare_one zest-interface-hbtc-v1 mainnet/contracts/hbtc/protocol/interfaces/zest-interface-v1.clar
-          compare_one hermetica-interface-hbtc-v1 mainnet/contracts/hbtc/protocol/interfaces/hermetica-interface-v1.clar
-          compare_one controller-hbtc-v1 mainnet/contracts/hbtc/protocol/controller-v1.clar
-          compare_one reserve-hbtc-v1 mainnet/contracts/hbtc/protocol/reserve-v1.clar
-          compare_one reserve-fund-hbtc-v1 mainnet/contracts/hbtc/protocol/reserve-fund-v1.clar
+          compare_one minting-auto-v1-2 mainnet/contracts/usdh/protocol/minting-auto-v1-2.clar
+          compare_one minting-auto-state-v1 mainnet/contracts/usdh/protocol/minting-auto-state-v1.clar
+          compare_one staking-v1-1 mainnet/contracts/usdh/protocol/staking-v1-1.clar
+          compare_one staking-silo-v1-1 mainnet/contracts/usdh/protocol/staking-silo-v1-1.clar
