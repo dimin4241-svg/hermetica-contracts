@@ -1,4 +1,4 @@
-name: Live USDh zero custom-cooldown principals
+name: Live hBTC atomic sweep reward evidence
 
 on:
   push:
@@ -14,61 +14,123 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     env:
       HIRO_API_KEY: ${{ secrets.HIRO_API_KEY }}
     steps:
       - uses: actions/checkout@v4
-      - name: Collapse custom cooldown history to current state
+      - name: Probe live accounting and sweep reward history
         shell: bash
         run: |
           set -euo pipefail
           node --input-type=module <<'NODE'
-          const C='SPN5AKG35QZSK2M8GAMR4AFX45659RJHDW353HSG.staking-state-v1';
+          const OWNER='SP1S1HSFH0SQQGWKB69EYFNY0B1MHRMGXR3J1FH4D';
+          const STATE=`${OWNER}.state-hbtc-v1`;
+          const TOKEN=`${OWNER}.token-hbtc`;
+          const RESERVE=`${OWNER}.reserve-hbtc-v1`;
+          const ZEST=`${OWNER}.zest-interface-hbtc-v1`;
+          const CTRL=`${OWNER}.controller-hbtc-v1`;
+          const TRADING=`${OWNER}.trading-hbtc-v1`;
           const KEY=process.env.HIRO_API_KEY||'';
           const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-          async function getJson(url){
-            for(let i=0;i<10;i++){
-              const h={accept:'application/json'}; if(KEY) h['x-api-key']=KEY;
-              const r=await fetch(url,{headers:h});
-              if(r.status===429){await sleep(1200+i*1000);continue;}
-              if(!r.ok) throw new Error(`${r.status} ${await r.text()}`);
-              return await r.json();
-            }
-            throw new Error('rate limit');
+          function headers(extra={}) {
+            const h={accept:'application/json',...extra};
+            if(KEY) h['x-api-key']=KEY;
+            return h;
           }
-          const events=[];
-          for(let offset=0;offset<1000;offset+=50){
-            const p=await getJson(`https://api.hiro.so/extended/v1/contract/${C}/events?limit=50&offset=${offset}`);
-            const rows=p.results??[];
-            for(const e of rows){
-              const repr=e?.contract_log?.value?.repr??'';
-              if(repr.includes('set-custom-cooldown')) events.push({tx_id:e.tx_id,repr});
+          async function fetchRetry(url,opts={}){
+            for(let i=0;i<12;i++){
+              const r=await fetch(url,{...opts,headers:{...headers(),...(opts.headers||{})}});
+              if(r.status===429){await sleep(1200+i*900);continue;}
+              if(!r.ok) throw new Error(`${r.status} ${url} ${await r.text()}`);
+              return r;
             }
-            if(rows.length<50) break;
-            await sleep(KEY?30:200);
+            throw new Error(`rate limit ${url}`);
           }
-          // Hiro returns newest first. First event seen for a principal is current state.
-          const current=new Map();
-          const rePrincipal=/\(principal '([^\)]+)\)/;
-          const reNew=/\(new-value u(\d+)\)/;
-          const reOld=/\(old-value u(\d+)\)/;
-          for(const e of events){
-            const principal=e.repr.match(rePrincipal)?.[1];
-            if(!principal || current.has(principal)) continue;
-            current.set(principal,{
-              principal,
-              newValue:Number(e.repr.match(reNew)?.[1]??-1),
-              oldValue:Number(e.repr.match(reOld)?.[1]??-1),
-              tx_id:e.tx_id,
-              isContract:principal.includes('.'),
+          async function ro(contract,fn){
+            const dot=contract.indexOf('.');
+            const addr=contract.slice(0,dot), name=contract.slice(dot+1);
+            const r=await fetchRetry(`https://api.hiro.so/v2/contracts/call-read/${addr}/${name}/${fn}`,{
+              method:'POST',
+              headers:{'content-type':'application/json'},
+              body:JSON.stringify({sender:OWNER,arguments:[]})
             });
+            const j=await r.json();
+            if(!j.okay) throw new Error(`${contract}.${fn}: ${JSON.stringify(j)}`);
+            return j.result;
           }
-          console.log(`CURRENT_CUSTOM_COUNT=${current.size}`);
-          for(const x of current.values()) console.log('CURRENT_CUSTOM='+JSON.stringify(x));
-          const zero=[...current.values()].filter(x=>x.newValue===0);
-          console.log(`CURRENT_ZERO_COUNT=${zero.length}`);
-          console.log(`CURRENT_ZERO_CONTRACT_COUNT=${zero.filter(x=>x.isContract).length}`);
-          console.log(`CURRENT_ZERO_STANDARD_COUNT=${zero.filter(x=>!x.isContract).length}`);
-          for(const x of zero) console.log('CURRENT_ZERO='+JSON.stringify(x));
+          function cvUInt(v){
+            let h=String(v).replace(/^0x/,'');
+            if(h.slice(0,2)!=='01') throw new Error(`not uint cv: ${v}`);
+            return BigInt('0x'+h.slice(2));
+          }
+          function cvBool(v){
+            const h=String(v).replace(/^0x/,'').slice(0,2);
+            if(h==='03') return true;
+            if(h==='04') return false;
+            throw new Error(`not bool cv: ${v}`);
+          }
+          const uintFns=['get-total-assets','get-net-assets','get-deposit-cap','get-share-price','get-pending-fees','get-pending-rf','get-last-log-ts','get-max-reward','get-max-deviation','get-min-deposit'];
+          const live={};
+          for(const fn of uintFns){
+            live[fn]=cvUInt(await ro(STATE,fn));
+            console.log(`LIVE_${fn}=${live[fn]}`);
+          }
+          for(const fn of ['get-deposit-enabled','get-reward-enabled','get-trading-enabled']){
+            live[fn]=cvBool(await ro(STATE,fn));
+            console.log(`LIVE_${fn}=${live[fn]}`);
+          }
+          live['get-total-supply']=cvUInt(await ro(TOKEN,'get-total-supply'));
+          console.log(`LIVE_get-total-supply=${live['get-total-supply']}`);
+
+          async function balances(address){
+            return await (await fetchRetry(`https://api.hiro.so/extended/v1/address/${address}/balances`)).json();
+          }
+          for(const [label,address] of [['RESERVE',RESERVE],['ZEST',ZEST],['TRADING',TRADING]]){
+            const b=await balances(address);
+            console.log(`${label}_STX=${b.stx?.balance??'n/a'}`);
+            console.log(`${label}_FT=${JSON.stringify(b.fungible_tokens??{})}`);
+          }
+
+          async function contractEvents(contract){
+            const out=[];
+            for(let offset=0;offset<2000;offset+=50){
+              const p=await (await fetchRetry(`https://api.hiro.so/extended/v1/contract/${contract}/events?limit=50&offset=${offset}`)).json();
+              const rows=p.results??[];
+              out.push(...rows);
+              if(rows.length<50) break;
+              await sleep(KEY?20:180);
+            }
+            return out;
+          }
+          const zestEvents=await contractEvents(ZEST);
+          const ctrlEvents=await contractEvents(CTRL);
+          const sweepEvents=zestEvents.filter(e=>(e?.contract_log?.value?.repr??'').includes('(action "sweep")'));
+          const rewardEvents=ctrlEvents.filter(e=>(e?.contract_log?.value?.repr??'').includes('(action "log-reward")'));
+          console.log(`SWEEP_COUNT=${sweepEvents.length}`);
+          console.log(`REWARD_COUNT=${rewardEvents.length}`);
+          for(const e of sweepEvents) console.log('SWEEP_EVENT='+JSON.stringify({tx_id:e.tx_id,event_index:e.event_index,repr:e.contract_log?.value?.repr}));
+          for(const e of rewardEvents) console.log('REWARD_EVENT='+JSON.stringify({tx_id:e.tx_id,event_index:e.event_index,repr:e.contract_log?.value?.repr}));
+
+          const ids=[...new Set([...sweepEvents,...rewardEvents].map(e=>e.tx_id).filter(Boolean))];
+          const txs=[];
+          for(const id of ids){
+            const t=await (await fetchRetry(`https://api.hiro.so/extended/v1/tx/${id}`)).json();
+            txs.push({
+              tx_id:id,
+              block_height:t.block_height,
+              burn_block_time:t.burn_block_time,
+              burn_block_time_iso:t.burn_block_time_iso,
+              sender:t.sender_address,
+              contract_call:t.contract_call ? {contract_id:t.contract_call.contract_id,function_name:t.contract_call.function_name} : null,
+              tx_status:t.tx_status
+            });
+            await sleep(KEY?20:180);
+          }
+          txs.sort((a,b)=>(a.block_height??0)-(b.block_height??0) || String(a.tx_id).localeCompare(String(b.tx_id)));
+          for(const t of txs) console.log('TIMELINE_TX='+JSON.stringify(t));
+
+          const same=new Set(sweepEvents.map(e=>e.tx_id).filter(id=>rewardEvents.some(r=>r.tx_id===id)));
+          console.log(`ATOMIC_SHARED_TX_COUNT=${same.size}`);
+          for(const id of same) console.log(`ATOMIC_SHARED_TX=${id}`);
           NODE
