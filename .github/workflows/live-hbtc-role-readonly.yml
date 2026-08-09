@@ -1,0 +1,64 @@
+name: Live hBTC role read-only probe
+
+on:
+  push:
+    branches:
+      - evidence/live-hbtc-role-readonly
+    paths:
+      - .github/workflows/live-hbtc-role-readonly.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Query deployed HQ roles without state changes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          HQ_ADDR='SP1S1HSFH0SQQGWKB69EYFNY0B1MHRMGXR3J1FH4D'
+          HQ_NAME='hq-v1'
+          TRADING='SP1S1HSFH0SQQGWKB69EYFNY0B1MHRMGXR3J1FH4D.trading-hbtc-v1'
+
+          ARG=$(TRADING="$TRADING" node --input-type=module <<'NODE'
+          import { Cl, serializeCV } from '@stacks/transactions';
+          const cv = Cl.principal(process.env.TRADING);
+          const raw = serializeCV(cv);
+          console.log('0x' + Buffer.from(raw).toString('hex'));
+          NODE
+          )
+
+          echo "trading=$TRADING"
+          echo "clarity_arg=$ARG"
+
+          for FN in get-trader get-manager get-rewarder get-protocol; do
+            echo "=== $FN ==="
+            curl --fail-with-body -sS \
+              -X POST \
+              -H 'content-type: application/json' \
+              "https://api.hiro.so/v2/contracts/call-read/${HQ_ADDR}/${HQ_NAME}/${FN}" \
+              --data "{\"sender\":\"${HQ_ADDR}\",\"arguments\":[\"${ARG}\"]}" \
+              | tee "/tmp/${FN}.json"
+            echo
+          done
+
+          echo '=== summary ==='
+          for FN in get-trader get-manager get-rewarder get-protocol; do
+            printf '%s=' "$FN"
+            jq -r '.result // .cause // .' "/tmp/${FN}.json"
+          done
