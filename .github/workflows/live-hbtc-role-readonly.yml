@@ -37,9 +37,12 @@ jobs:
 
           ARG=$(TRADING="$TRADING" node --input-type=module <<'NODE'
           import { Cl, serializeCV } from '@stacks/transactions';
-          const cv = Cl.principal(process.env.TRADING);
-          const raw = serializeCV(cv);
-          console.log('0x' + Buffer.from(raw).toString('hex'));
+          const raw = serializeCV(Cl.principal(process.env.TRADING));
+          if (typeof raw === 'string') {
+            console.log(raw.startsWith('0x') ? raw : '0x' + raw);
+          } else {
+            console.log('0x' + Buffer.from(raw).toString('hex'));
+          }
           NODE
           )
 
