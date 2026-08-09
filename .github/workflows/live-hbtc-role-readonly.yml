@@ -1,4 +1,4 @@
-name: Live hBTC sweep reward gap correlation
+name: Live hBTC historical deposit window scan
 
 on:
   push:
@@ -14,59 +14,100 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     env:
       HIRO_API_KEY: ${{ secrets.HIRO_API_KEY }}
     steps:
       - uses: actions/checkout@v4
-      - name: Correlate latest sweep reward pairs and user vault actions
+      - name: Find historical deposits and nearby sweep reward pairs
         shell: bash
         run: |
           set -euo pipefail
           node --input-type=module <<'NODE'
           const O='SP1S1HSFH0SQQGWKB69EYFNY0B1MHRMGXR3J1FH4D';
-          const Z=`${O}.zest-interface-hbtc-v1`, C=`${O}.controller-hbtc-v1`, V=`${O}.vault-hbtc-v1-2`;
+          const V=`${O}.vault-hbtc-v1-2`, Z=`${O}.zest-interface-hbtc-v1`, C=`${O}.controller-hbtc-v1`;
           const KEY=process.env.HIRO_API_KEY||'';
           const sleep=ms=>new Promise(r=>setTimeout(r,ms));
           async function req(url){
-            for(let i=0;i<8;i++){
+            for(let i=0;i<10;i++){
               const h={accept:'application/json'}; if(KEY) h['x-api-key']=KEY;
               const r=await fetch(url,{headers:h});
-              if(r.status===429){await sleep(700+i*700);continue;}
+              if(r.status===429){await sleep(900+i*700);continue;}
               if(!r.ok) throw new Error(`${r.status} ${url} ${await r.text()}`);
               return await r.json();
             }
             throw new Error('rate limit '+url);
           }
-          async function page(contract){return (await req(`https://api.hiro.so/extended/v1/contract/${contract}/events?limit=50&offset=0`)).results??[];}
-          const ze=await page(Z), ce=await page(C), ve=await page(V);
-          const sweeps=ze.map(e=>({e,repr:e?.contract_log?.value?.repr??''})).filter(x=>x.repr.includes('(action "sweep")')).map(x=>({tx:x.e.tx_id,amount:Number(x.repr.match(/\(amount u(\d+)\)/)?.[1]??-1),repr:x.repr}));
-          const rewards=ce.map(e=>({e,repr:e?.contract_log?.value?.repr??''})).filter(x=>x.repr.includes('(action "log-reward")')).map(x=>({tx:x.e.tx_id,amount:Number(x.repr.match(/\(gross u(\d+)\)/)?.[1]??-1),positive:x.repr.includes('(is-positive true)'),repr:x.repr}));
-          console.log(`LATEST_SWEEPS=${sweeps.length}`);
-          console.log(`LATEST_REWARDS=${rewards.length}`);
+          async function events(contract,max=1000){
+            const out=[];
+            for(let offset=0;offset<max;offset+=50){
+              const p=await req(`https://api.hiro.so/extended/v1/contract/${contract}/events?limit=50&offset=${offset}`);
+              const rows=p.results??[]; out.push(...rows);
+              if(rows.length<50) break;
+              await sleep(KEY?10:100);
+            }
+            return out;
+          }
           async function tx(id){
             const t=await req(`https://api.hiro.so/extended/v1/tx/${id}`);
             return {tx_id:id,block_height:t.block_height,burn_block_time:t.burn_block_time,burn_block_time_iso:t.burn_block_time_iso,sender:t.sender_address,status:t.tx_status,contract_call:t.contract_call?{contract_id:t.contract_call.contract_id,function_name:t.contract_call.function_name}:null};
           }
-          let shown=0;
-          for(const s of sweeps){
-            const r=rewards.find(x=>x.amount===s.amount);
-            if(!r) continue;
-            const st=await tx(s.tx), rt=await tx(r.tx);
-            const gapBlocks=(rt.block_height??0)-(st.block_height??0);
-            const gapSeconds=(rt.burn_block_time??0)-(st.burn_block_time??0);
-            console.log('PAIR='+JSON.stringify({amount:s.amount,positive:r.positive,sweep:st,reward:rt,gapBlocks,gapSeconds,sameTx:s.tx===r.tx}));
-            shown++; if(shown>=8) break;
-          }
-          const vaultActions=[];
+          const ve=await events(V,1200);
+          const deposits=[];
+          const seen=new Set();
           for(const e of ve){
             const repr=e?.contract_log?.value?.repr??'';
-            const action=repr.match(/\(action \"([^\"]+)\"\)/)?.[1]??'';
-            if(['deposit','fund-claim','fund-claim-many','process-claim','request-redeem'].includes(action)) vaultActions.push({tx:e.tx_id,action,repr});
+            if(!repr.includes('(action "deposit")') || seen.has(e.tx_id)) continue;
+            seen.add(e.tx_id);
+            const assets=Number(repr.match(/\(assets u(\d+)\)/)?.[1]??-1);
+            const shares=Number(repr.match(/\(shares u(\d+)\)/)?.[1]??-1);
+            deposits.push({tx:e.tx_id,assets,shares,repr});
           }
-          console.log(`VAULT_RELEVANT_LATEST=${vaultActions.length}`);
-          for(const a of vaultActions.slice(0,20)){
-            const t=await tx(a.tx);
-            console.log('VAULT_ACTION='+JSON.stringify({action:a.action,tx:t,repr:a.repr}));
+          console.log(`DEPOSIT_COUNT=${deposits.length}`);
+          const depMeta=[];
+          for(const d of deposits.slice(0,60)){
+            const t=await tx(d.tx); depMeta.push({...d,t});
+            console.log('DEPOSIT='+JSON.stringify({assets:d.assets,shares:d.shares,tx:t}));
+            await sleep(KEY?10:80);
           }
+          if(!depMeta.length) process.exit(0);
+          const oldest=Math.min(...depMeta.map(d=>d.t.burn_block_time??Number.MAX_SAFE_INTEGER));
+          const newest=Math.max(...depMeta.map(d=>d.t.burn_block_time??0));
+          console.log(`DEPOSIT_TIME_RANGE=${new Date(oldest*1000).toISOString()}..${new Date(newest*1000).toISOString()}`);
+
+          const ze=await events(Z,1200), ce=await events(C,1200);
+          const sweeps=[]; const rewards=[];
+          for(const e of ze){
+            const repr=e?.contract_log?.value?.repr??''; if(!repr.includes('(action "sweep")')) continue;
+            sweeps.push({tx:e.tx_id,amount:Number(repr.match(/\(amount u(\d+)\)/)?.[1]??-1)});
+          }
+          for(const e of ce){
+            const repr=e?.contract_log?.value?.repr??''; if(!repr.includes('(action "log-reward")')) continue;
+            rewards.push({tx:e.tx_id,amount:Number(repr.match(/\(gross u(\d+)\)/)?.[1]??-1),positive:repr.includes('(is-positive true)')});
+          }
+          console.log(`SWEEPS_SCANNED=${sweeps.length} REWARDS_SCANNED=${rewards.length}`);
+          const pairCandidates=[];
+          const usedRewards=new Set();
+          for(const s of sweeps){
+            const r=rewards.find(x=>!usedRewards.has(x.tx) && x.amount===s.amount);
+            if(r){ usedRewards.add(r.tx); pairCandidates.push({s,r}); }
+          }
+          console.log(`PAIR_CANDIDATES=${pairCandidates.length}`);
+          // Only fetch pairs whose tx metadata could overlap deposit date range (+2 days buffer).
+          const buffer=2*86400;
+          let overlaps=0;
+          for(const p of pairCandidates.slice(0,250)){
+            const st=await tx(p.s.tx);
+            if((st.burn_block_time??0)<oldest-buffer || (st.burn_block_time??0)>newest+buffer) continue;
+            const rt=await tx(p.r.tx);
+            const a=st.burn_block_time??0,b=rt.burn_block_time??0;
+            if(b<=a) continue;
+            const inside=depMeta.filter(d=>(d.t.burn_block_time??0)>a && (d.t.burn_block_time??0)<b);
+            if(inside.length){
+              overlaps++;
+              console.log('DEPOSIT_IN_WINDOW='+JSON.stringify({amount:p.s.amount,positive:p.r.positive,sweep:st,reward:rt,gapSeconds:b-a,deposits:inside.map(d=>({assets:d.assets,shares:d.shares,tx:d.t}))}));
+            }
+            await sleep(KEY?10:60);
+          }
+          console.log(`DEPOSIT_WINDOW_OVERLAPS=${overlaps}`);
           NODE
