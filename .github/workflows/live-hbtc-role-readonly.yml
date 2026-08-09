@@ -1,4 +1,4 @@
-name: Live hBTC minting-auto economic invariant probe
+name: Live hBTC Pyth fee and staleness probe
 
 on:
   push:
@@ -14,7 +14,9 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    env:
+      HIRO_API_KEY: ${{ secrets.HIRO_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -23,86 +25,95 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
-      - name: Read live configuration and brute-force same-price round trips
+      - name: Read Pyth fee, interface STX balance, and recent 10-block time spans
         shell: bash
         run: |
           set -euo pipefail
           node --input-type=module <<'NODE'
-          import { Cl, serializeCV, deserializeCV, cvToJSON } from '@stacks/transactions';
+          import { deserializeCV, cvToJSON } from '@stacks/transactions';
 
-          const HBTC='SP1S1HSFH0SQQGWKB69EYFNY0B1MHRMGXR3J1FH4D';
-          const USDH='SPN5AKG35QZSK2M8GAMR4AFX45659RJHDW353HSG';
-          const SBTC='SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token';
-          const HIF=`${HBTC}.hermetica-interface-hbtc-v1`;
+          const PYTH='SP1CGXWEAMG6P6FT04W66NVGJ7PQWMDAC19R7PJ0Y';
+          const HIF='SP1S1HSFH0SQQGWKB69EYFNY0B1MHRMGXR3J1FH4D.hermetica-interface-hbtc-v1';
+          const API_KEY=process.env.HIRO_API_KEY || '';
           const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 
-          function hex(cv){const x=serializeCV(cv); return typeof x==='string'?(x.startsWith('0x')?x:'0x'+x):'0x'+Buffer.from(x).toString('hex');}
-          async function read(addr,name,fn,args=[]){
+          async function getJson(url){
+            for(let attempt=0; attempt<10; attempt++){
+              const headers={'accept':'application/json'};
+              if(API_KEY) headers['x-api-key']=API_KEY;
+              const r=await fetch(url,{headers});
+              if(r.status===429){await sleep(1500+attempt*1500);continue;}
+              if(!r.ok) throw new Error(`${url}: HTTP ${r.status} ${await r.text()}`);
+              return await r.json();
+            }
+            throw new Error(`rate limit: ${url}`);
+          }
+
+          async function callRead(addr,name,fn){
+            const headers={'content-type':'application/json'};
+            if(API_KEY) headers['x-api-key']=API_KEY;
             const url=`https://api.hiro.so/v2/contracts/call-read/${addr}/${name}/${fn}`;
-            const body=JSON.stringify({sender:addr,arguments:args.map(hex)});
-            for(let i=0;i<8;i++){
-              const r=await fetch(url,{method:'POST',headers:{'content-type':'application/json'},body});
-              if(r.status===429){await sleep(2000+i*1500);continue;}
-              if(!r.ok) throw new Error(`${name}.${fn}: ${r.status} ${await r.text()}`);
-              const j=await r.json(); if(!j.result) throw new Error(JSON.stringify(j));
+            for(let attempt=0;attempt<10;attempt++){
+              const r=await fetch(url,{method:'POST',headers,body:JSON.stringify({sender:addr,arguments:[]})});
+              if(r.status===429){await sleep(1500+attempt*1500);continue;}
+              if(!r.ok) throw new Error(`${fn}: HTTP ${r.status} ${await r.text()}`);
+              const j=await r.json();
+              if(!j.result) throw new Error(`${fn}: ${JSON.stringify(j)}`);
               return cvToJSON(deserializeCV(j.result));
             }
-            throw new Error('rate limit');
-          }
-          const u = j => BigInt(j.success===true ? j.value.value : j.value);
-
-          const mintFeeJ=await read(USDH,'minting-auto-state-v1','get-mint-fee');
-          const redeemFeeJ=await read(USDH,'minting-auto-state-v1','get-redeem-fee');
-          const minJ=await read(USDH,'minting-state-v1','get-min-amount-usdh-requested');
-          const wlJ=await read(USDH,'minting-auto-state-v1','get-whitelist',[Cl.principal(HIF),Cl.principal(SBTC)]);
-          const supportedJ=await read(USDH,'minting-auto-state-v1','get-supported-asset',[Cl.principal(SBTC)]);
-          const hAssetJ=await read(HBTC,'state-hbtc-v1','get-asset',[Cl.principal(SBTC)]);
-
-          console.log('mint_fee=' + JSON.stringify(mintFeeJ));
-          console.log('redeem_fee=' + JSON.stringify(redeemFeeJ));
-          console.log('min_usdh=' + JSON.stringify(minJ));
-          console.log('whitelist=' + JSON.stringify(wlJ));
-          console.log('supported_sbtc=' + JSON.stringify(supportedJ));
-          console.log('hbtc_asset=' + JSON.stringify(hAssetJ));
-
-          const mintFee=u(mintFeeJ), redeemFee=u(redeemFeeJ), minUsdh=u(minJ);
-          const slip=BigInt(wlJ.value['price-slippage'].value);
-          const tokenBase=100_000_000n, usdhBase=100_000_000n, priceBase=100_000_000n, bps=10_000n;
-          console.log(`CONFIG|minUsdh=${minUsdh}|slipBps=${slip}|mintFee=${mintFee}|redeemFee=${redeemFee}`);
-
-          function mintRequired(amountUsdh, price){
-            const slippageInPrice=(price*slip)/bps;
-            const denom=price-slippageInPrice;
-            const required=(amountUsdh*priceBase*tokenBase)/denom/usdhBase;
-            const before=(amountUsdh*priceBase*tokenBase)/price/usdhBase;
-            const assetSlip=required-before;
-            const fee=(assetSlip*mintFee)/bps;
-            return {required,before,fee};
-          }
-          function redeemOut(amountUsdh, price){
-            const slippageInPrice=(price*slip)/bps;
-            const denom=price+slippageInPrice;
-            const required=(amountUsdh*priceBase*tokenBase)/denom/usdhBase;
-            const before=(amountUsdh*priceBase*tokenBase)/price/usdhBase;
-            const assetSlip=before-required;
-            const fee=(assetSlip*redeemFee)/bps;
-            return {out:required-fee,required,before,fee};
+            throw new Error(`rate limit: ${fn}`);
           }
 
-          let best=null;
-          for(let usd=1000; usd<=500000; usd+=1000){
-            const price=BigInt(usd)*priceBase;
-            for(const mult of [1n,2n,3n,10n,100n,1000n,10000n]){
-              const amount=minUsdh*mult;
-              const m=mintRequired(amount,price), r=redeemOut(amount,price);
-              const delta=r.out-m.required;
-              if(best===null || delta>best.delta) best={usd,amount,delta,mintIn:m.required,redeemOut:r.out};
-              if(delta>0n){
-                console.log('POSITIVE_ROUNDTRIP=' + JSON.stringify({usd,amount:amount.toString(),delta:delta.toString()}));
-                process.exit(2);
+          console.log(`hiro_api_key_present=${API_KEY?'yes':'no'}`);
+
+          const fee=await callRead(PYTH,'pyth-governance-v3','get-fee-info');
+          console.log('PYTH_FEE_INFO=' + JSON.stringify(fee));
+
+          const balances=await getJson(`https://api.hiro.so/extended/v1/address/${HIF}/balances`);
+          console.log('HIF_STX_BALANCE=' + (balances?.stx?.balance ?? 'UNKNOWN'));
+          console.log('HIF_STX_TOTAL_SENT=' + (balances?.stx?.total_sent ?? 'UNKNOWN'));
+          console.log('HIF_STX_TOTAL_RECEIVED=' + (balances?.stx?.total_received ?? 'UNKNOWN'));
+
+          const inbound=await getJson(`https://api.hiro.so/extended/v1/address/${HIF}/stx_inbound?limit=50&offset=0`);
+          console.log(`HIF_STX_INBOUND_COUNT_PAGE=${inbound?.results?.length ?? 0}`);
+          for(const x of (inbound?.results ?? []).slice(0,10)){
+            console.log('HIF_STX_INBOUND=' + JSON.stringify({sender:x.sender,amount:x.amount,block_height:x.block_height,tx_id:x.tx_id,transfer_type:x.transfer_type}));
+          }
+
+          // Fetch 1,020 recent canonical Stacks blocks via Hiro's documented
+          // /extended/v1/block endpoint (max 30/page), then calculate exact
+          // wall-clock spans between height h and h-10.
+          const blocks=[];
+          for(let offset=0; offset<1020; offset+=30){
+            const page=await getJson(`https://api.hiro.so/extended/v1/block?limit=30&offset=${offset}`);
+            for(const b of (page.results ?? [])){
+              if(b.canonical !== false && Number.isFinite(Number(b.height)) && Number.isFinite(Number(b.block_time))){
+                blocks.push({height:Number(b.height),time:Number(b.block_time),hash:b.hash});
               }
             }
+            await sleep(API_KEY?30:180);
           }
-          console.log('BEST_SAME_PRICE_ROUNDTRIP=' + JSON.stringify(Object.fromEntries(Object.entries(best).map(([k,v])=>[k,typeof v==='bigint'?v.toString():v]))));
-          console.log(best.delta>0n?'ROUNDTRIP_INVARIANT=VIOLATED':'ROUNDTRIP_INVARIANT=NO_POSITIVE_DELTA');
+          const byHeight=new Map(blocks.map(b=>[b.height,b]));
+          const spans=[];
+          for(const b of blocks){
+            const prev=byHeight.get(b.height-10);
+            if(prev){
+              const seconds=b.time-prev.time;
+              if(seconds>=0) spans.push({height:b.height,seconds,from:prev.time,to:b.time,hash:b.hash});
+            }
+          }
+          spans.sort((a,b)=>a.seconds-b.seconds);
+          const pct=p=>spans[Math.min(spans.length-1,Math.max(0,Math.floor((spans.length-1)*p)))];
+          const max=spans.at(-1);
+          const over=(n)=>spans.filter(x=>x.seconds>n).length;
+          console.log(`BLOCKS_FETCHED=${blocks.length}`);
+          console.log(`TEN_BLOCK_SPANS=${spans.length}`);
+          console.log(`TEN_BLOCK_P50=${pct(.50)?.seconds ?? 'NA'}`);
+          console.log(`TEN_BLOCK_P90=${pct(.90)?.seconds ?? 'NA'}`);
+          console.log(`TEN_BLOCK_P99=${pct(.99)?.seconds ?? 'NA'}`);
+          console.log(`TEN_BLOCK_MAX=${max?.seconds ?? 'NA'}`);
+          console.log(`TEN_BLOCK_OVER_120S=${over(120)}`);
+          console.log(`TEN_BLOCK_OVER_300S=${over(300)}`);
+          console.log(`TEN_BLOCK_OVER_600S=${over(600)}`);
+          for(const x of spans.slice(-10).reverse()) console.log('TEN_BLOCK_TOP=' + JSON.stringify(x));
           NODE
