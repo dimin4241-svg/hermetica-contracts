@@ -1,4 +1,4 @@
-name: Pinpoint May hBTC harvest windows
+name: Live hBTC express limiter probe
 
 on:
   push:
@@ -19,43 +19,50 @@ jobs:
       HIRO_API_KEY: ${{ secrets.HIRO_API_KEY }}
     steps:
       - uses: actions/checkout@v4
-      - name: Find May 26-27 sweep reward txs
+      - name: Read live express configuration and recent express requests
         shell: bash
         run: |
           set -euo pipefail
           node --input-type=module <<'NODE'
           const O='SP1S1HSFH0SQQGWKB69EYFNY0B1MHRMGXR3J1FH4D';
-          const configs=[
-            ['ZEST',`${O}.zest-interface-hbtc-v1`,'(action "sweep")',[100,150,175,200,225,250,275]],
-            ['CTRL',`${O}.controller-hbtc-v1`,'(action "log-reward")',[0,50,75,100,125,150,175,200,225,250]]
-          ];
+          const STATE=`${O}.state-hbtc-v1`, TOKEN=`${O}.token-hbtc`, VAULT=`${O}.vault-hbtc-v1-2`;
           const KEY=process.env.HIRO_API_KEY||'';
           const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-          async function req(url){
-            for(let i=0;i<10;i++){
-              const h={accept:'application/json'};if(KEY)h['x-api-key']=KEY;
-              const r=await fetch(url,{headers:h});
-              if(r.status===429){await sleep(1400+i*900);continue;}
-              if(!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+          async function req(url,opts={}){
+            for(let i=0;i<8;i++){
+              const h={accept:'application/json',...(opts.headers||{})}; if(KEY) h['x-api-key']=KEY;
+              const r=await fetch(url,{...opts,headers:h});
+              if(r.status===429){await sleep(900+i*700);continue;}
+              if(!r.ok) throw new Error(`${r.status} ${url} ${await r.text()}`);
               return await r.json();
             }
-            return null;
+            throw new Error('rate limit '+url);
           }
-          async function tx(id){const t=await req(`https://api.hiro.so/extended/v1/tx/${id}`);return t?{tx_id:id,block_height:t.block_height,time:t.burn_block_time_iso,sender:t.sender_address,function_name:t.contract_call?.function_name}:null;}
-          for(const [label,contract,needle,offsets] of configs){
-            const seen=new Set();
-            for(const offset of offsets){
-              const p=await req(`https://api.hiro.so/extended/v1/contract/${contract}/events?limit=50&offset=${offset}`); if(!p)continue;
-              for(const e of p.results??[]){
-                if(seen.has(e.tx_id))continue;
-                const repr=e?.contract_log?.value?.repr??''; if(!repr.includes(needle))continue;
-                const t=await tx(e.tx_id); if(!t)continue;
-                if((t.time||'').startsWith('2026-05-26')||(t.time||'').startsWith('2026-05-27')){
-                  seen.add(e.tx_id);
-                  console.log(label+'_MAY='+JSON.stringify({tx:t,repr}));
-                }
-              }
-              await sleep(300);
+          async function ro(contract,fn,args=[]){
+            const dot=contract.indexOf('.');
+            const j=await req(`https://api.hiro.so/v2/contracts/call-read/${contract.slice(0,dot)}/${contract.slice(dot+1)}/${fn}`,{
+              method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({sender:O,arguments:args})
+            });
+            if(!j.okay) throw new Error(`${fn}: ${JSON.stringify(j)}`);
+            return j.result;
+          }
+          function unwrap(v){let h=String(v).replace(/^0x/,'');if(h.startsWith('07'))h=h.slice(2);return h;}
+          function uint(v){const h=unwrap(v);if(!h.startsWith('01'))throw new Error(`not uint ${v}`);return BigInt('0x'+h.slice(2));}
+          function bool(v){const h=unwrap(v).slice(0,2);if(h==='03')return true;if(h==='04')return false;throw new Error(`not bool ${v}`);}
+          for(const fn of ['get-express-limit','get-express-window','get-express-cooldown','get-last-express-ts','get-current-express-limit','get-net-assets']){
+            console.log(`LIVE_${fn}=${uint(await ro(STATE,fn))}`);
+          }
+          for(const fn of ['get-express-enabled','get-express-limit-enabled']) console.log(`LIVE_${fn}=${bool(await ro(STATE,fn))}`);
+          console.log(`LIVE_total_supply=${uint(await ro(TOKEN,'get-total-supply'))}`);
+          console.log(`LIVE_effective_raw=${await ro(STATE,'get-effective-express-limit')}`);
+
+          const p=await req(`https://api.hiro.so/extended/v1/contract/${VAULT}/events?limit=50&offset=0`);
+          let n=0;
+          for(const e of p.results??[]){
+            const repr=e?.contract_log?.value?.repr??'';
+            if(repr.includes('(action "request-redeem")') && repr.includes('(is-express true)')){
+              console.log('EXPRESS_EVENT='+JSON.stringify({tx_id:e.tx_id,event_index:e.event_index,repr})); n++;
             }
           }
+          console.log(`EXPRESS_EVENTS_LATEST_PAGE=${n}`);
           NODE
