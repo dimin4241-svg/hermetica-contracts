@@ -1,0 +1,31 @@
+name: USDh Authority Recon
+
+on:
+  push:
+    branches:
+      - validation-usdh-jit-reward-poc
+    paths:
+      - 'tests/security/usdh/read-live-usdh-full-authority-graph.mjs'
+      - '.github/workflows/usdh-authority-recon.yml'
+  workflow_dispatch:
+
+jobs:
+  authority:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Reconstruct full live USDh authority and trader graph
+        run: node tests/security/usdh/read-live-usdh-full-authority-graph.mjs
+      - name: Upload authority evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: usdh-authority-recon
+          path: tests/security/evidence/live-usdh-full-authority-graph.json
+          if-no-files-found: warn
