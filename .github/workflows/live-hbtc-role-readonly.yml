@@ -1,4 +1,4 @@
-name: Live USDh staking custom-cooldown probe
+name: Live USDh zero custom-cooldown principals
 
 on:
   push:
@@ -19,7 +19,7 @@ jobs:
       HIRO_API_KEY: ${{ secrets.HIRO_API_KEY }}
     steps:
       - uses: actions/checkout@v4
-      - name: Enumerate staking-state custom cooldown events
+      - name: Collapse custom cooldown history to current state
         shell: bash
         run: |
           set -euo pipefail
@@ -46,7 +46,29 @@ jobs:
               if(repr.includes('set-custom-cooldown')) events.push({tx_id:e.tx_id,repr});
             }
             if(rows.length<50) break;
+            await sleep(KEY?30:200);
           }
-          console.log(`CUSTOM_EVENTS=${events.length}`);
-          for(const e of events) console.log('CUSTOM_EVENT='+JSON.stringify(e));
+          // Hiro returns newest first. First event seen for a principal is current state.
+          const current=new Map();
+          const rePrincipal=/\(principal '([^\)]+)\)/;
+          const reNew=/\(new-value u(\d+)\)/;
+          const reOld=/\(old-value u(\d+)\)/;
+          for(const e of events){
+            const principal=e.repr.match(rePrincipal)?.[1];
+            if(!principal || current.has(principal)) continue;
+            current.set(principal,{
+              principal,
+              newValue:Number(e.repr.match(reNew)?.[1]??-1),
+              oldValue:Number(e.repr.match(reOld)?.[1]??-1),
+              tx_id:e.tx_id,
+              isContract:principal.includes('.'),
+            });
+          }
+          console.log(`CURRENT_CUSTOM_COUNT=${current.size}`);
+          for(const x of current.values()) console.log('CURRENT_CUSTOM='+JSON.stringify(x));
+          const zero=[...current.values()].filter(x=>x.newValue===0);
+          console.log(`CURRENT_ZERO_COUNT=${zero.length}`);
+          console.log(`CURRENT_ZERO_CONTRACT_COUNT=${zero.filter(x=>x.isContract).length}`);
+          console.log(`CURRENT_ZERO_STANDARD_COUNT=${zero.filter(x=>!x.isContract).length}`);
+          for(const x of zero) console.log('CURRENT_ZERO='+JSON.stringify(x));
           NODE
