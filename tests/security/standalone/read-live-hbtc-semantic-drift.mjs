@@ -92,6 +92,30 @@ function hasDiff(d) {
 }
 function sha(s) { return crypto.createHash('sha256').update(s).digest('hex'); }
 
+const ALIASES = [
+  ['.reserve-fund', '.reserve-fund-hbtc-v1'],
+  ['.fee-collector', '.fee-collector-hbtc-v1'],
+  ['.hermetica-interface', '.hermetica-interface-hbtc-v1'],
+  ['.zest-interface', '.zest-interface-hbtc-v1'],
+  ['.controller-hbtc', '.controller-hbtc-v1'],
+  ['.hq-hbtc', '.hq-v1'],
+  ['.state', '.state-hbtc-v1'],
+  ['.blacklist', '.blacklist-v1'],
+  ['.reserve', '.reserve-hbtc-v1'],
+];
+
+function canonicalExecutableSource(src, isLocal) {
+  let s = stripComments(src)
+    .replace(/^\s*\(use-trait[^\n]*$/gm, '')
+    .replace(/^\s*\(impl-trait[^\n]*$/gm, '');
+  if (isLocal) {
+    for (const [from, to] of ALIASES) s = s.split(from).join(to);
+  }
+  // Deployment can rename trait-only contracts while executable behavior remains identical.
+  // We already compare all callable functions/state/auth separately, so strip declaration-only trait lines above.
+  return s.replace(/\s+/g, ' ').trim();
+}
+
 const results = [];
 for (const [liveName, localPath] of CONTRACTS) {
   const localSource = fs.readFileSync(localPath, 'utf8');
@@ -101,28 +125,33 @@ for (const [liveName, localPath] of CONTRACTS) {
   const localFp = fingerprint(localSource);
   const liveFp = fingerprint(liveSource);
   const semanticDiff = compareFingerprints(localFp, liveFp);
+  const localCanonical = canonicalExecutableSource(localSource, true);
+  const liveCanonical = canonicalExecutableSource(liveSource, false);
   results.push({
     live_contract: `${DEPLOYER}.${liveName}`,
     local_path: localPath,
     live_source_sha256: sha(liveSource),
     local_source_sha256: sha(localSource),
     exact_source_match: liveSource === localSource,
+    canonical_executable_local_sha256: sha(localCanonical),
+    canonical_executable_live_sha256: sha(liveCanonical),
+    canonical_executable_match: localCanonical === liveCanonical,
     semantic_diff: semanticDiff,
     semantic_drift_detected: hasDiff(semanticDiff),
     local_fingerprint: localFp,
     live_fingerprint: liveFp,
   });
-  console.log(`SEMANTIC_DRIFT ${liveName}=${hasDiff(semanticDiff)}`);
+  console.log(`SEMANTIC_DRIFT ${liveName}=${hasDiff(semanticDiff)} FULL_CANONICAL_MATCH=${localCanonical === liveCanonical}`);
   await sleep(180);
 }
 
-const drift = results.filter(r => r.semantic_drift_detected);
+const drift = results.filter(r => r.semantic_drift_detected || !r.canonical_executable_match);
 const evidence = {
   observed_at: new Date().toISOString(),
-  methodology: 'Read-only Hiro deployed-source fetch versus checked-out repository. Comparison ignores formatting/deployment alias names and focuses on function/state/auth-sensitive structural fingerprints.',
+  methodology: 'Read-only Hiro deployed-source fetch versus checked-out repository. Full executable source is canonicalized for known deployment aliases; function/state/auth fingerprints are compared independently.',
   results,
-  contracts_with_semantic_drift: drift.map(r => r.live_contract),
+  contracts_with_semantic_or_body_drift: drift.map(r => r.live_contract),
 };
 fs.mkdirSync('tests/security/evidence', { recursive: true });
 fs.writeFileSync('tests/security/evidence/live-hbtc-semantic-drift.json', JSON.stringify(evidence, null, 2));
-console.log('LIVE_HBTC_SEMANTIC_DRIFT=' + JSON.stringify({contracts_with_semantic_drift:evidence.contracts_with_semantic_drift, count:drift.length}));
+console.log('LIVE_HBTC_SEMANTIC_DRIFT=' + JSON.stringify({contracts_with_semantic_or_body_drift:evidence.contracts_with_semantic_or_body_drift, count:drift.length}));
